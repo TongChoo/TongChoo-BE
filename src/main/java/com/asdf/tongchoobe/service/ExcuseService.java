@@ -163,10 +163,16 @@ public class ExcuseService {
             throw new BusinessException(ErrorCode.MAX_REPLY_ROUND_REACHED);
         }
 
+        String incomingMessage = request.getIncomingMessage().trim();
+        List<FastApiClient.ConversationTurn> conversation = conversation(previous);
+        // 현재 질문은 아직 DB에 저장된 계보에는 없으므로, AI가 반드시 최신 질문으로
+        // 인식할 수 있도록 이전 대화의 마지막 user turn으로 추가한다.
+        conversation.add(new FastApiClient.ConversationTurn("user", incomingMessage));
+
         FastApiClient.GeneratedExcuse reply = fastApiClient.reply(new FastApiClient.ReplyRequest(
                 previous.getSituation(), previous.getTarget(), previous.getTone(), rootExcuse(previous),
-                previous.getExcuseText(), conversation(previous), previous.getRoundNumber() + 1,
-                request.getIncomingMessage().trim()));
+                previous.getExcuseText(), conversation, previous.getRoundNumber() + 1,
+                incomingMessage));
         int earnedXp = calculateEarnedXp(reply.successRate(), reply.realism(), reply.persuasion(), previous.getTone());
 
         Excuse excuse = excuseRepository.save(Excuse.builder()
@@ -176,7 +182,7 @@ public class ExcuseService {
                 .target(previous.getTarget())
                 .tone(previous.getTone())
                 .excuseText(reply.excuseText())
-                .incomingMessage(request.getIncomingMessage().trim())
+                .incomingMessage(incomingMessage)
                 .roundNumber(previous.getRoundNumber() + 1)
                 .successRate(reply.successRate())
                 .realism(reply.realism())
