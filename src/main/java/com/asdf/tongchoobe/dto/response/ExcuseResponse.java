@@ -43,6 +43,12 @@ public class ExcuseResponse {
         return from(excuse, riskFactors, rememberItems, aftermaths, complexityWarning, List.of());
     }
 
+    /**
+     * 생성 직후 FastAPI가 반환한 답장 후보를 현재 API 응답에 함께 담는다.
+     *
+     * 후보는 별도 도메인 테이블에 저장하지 않고 생성 응답에서만 전달한다. 따라서 과거
+     * Excuse를 재조회하는 API는 빈 목록을 반환하며, 생성 화면은 최신 응답을 바로 표시한다.
+     */
     public static ExcuseResponse from(
             Excuse excuse,
             List<ExcuseRiskFactor> riskFactors,
@@ -75,7 +81,7 @@ public class ExcuseResponse {
                 .remember(rememberItems.stream()
                         .map(ExcuseRememberItem::getContent)
                         .toList())
-                .replyOptions(replyOptions == null ? List.of() : replyOptions)
+                .replyOptions(replyOptions == null ? List.of() : List.copyOf(replyOptions))
                 .earnedXp(excuse.getEarnedXp())
                 .complexityWarning(complexityWarning)
                 .createdAt(excuse.getCreatedAt())

@@ -90,12 +90,12 @@ public class FastApiClient {
     public record GeneratedExcuse(
             @JsonAlias({"excuse", "excuse_text"}) String excuseText,
             @JsonAlias({"successRate", "success_rate"}) Integer rawSuccessRate,
-            Integer rawRealism,
-            Integer rawPersuasion,
+            @JsonAlias({"realism", "raw_realism"}) Integer rawRealism,
+            @JsonAlias({"persuasion", "raw_persuasion"}) Integer rawPersuasion,
             @JsonAlias({"suspicionLevel", "suspicion_level"}) SuspicionLevel rawSuspicionLevel,
             Analysis analysis,
-            @JsonAlias("risk_factors") List<Item> legacyRiskFactors,
-            @JsonAlias("remember_items") List<Item> legacyRememberItems,
+            @JsonAlias({"riskFactors", "risk_factors"}) List<Item> legacyRiskFactors,
+            @JsonAlias({"rememberItems", "remember_items"}) List<Item> legacyRememberItems,
             @JsonAlias("remember") List<String> rememberTexts,
             @JsonAlias({"aftermath", "aftermaths"}) List<Aftermath> rawAftermaths,
             @JsonAlias({"replyOptions", "reply_options"}) List<String> rawReplyOptions) {

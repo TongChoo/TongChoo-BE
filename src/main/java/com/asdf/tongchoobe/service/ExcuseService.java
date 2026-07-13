@@ -73,7 +73,7 @@ public class ExcuseService {
 
         user.gainXp(earnedXp);
 
-        return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, null);
+        return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, null, generated.replyOptions());
     }
 
     public PageResponse<ExcuseSummaryResponse> getMyExcuses(CustomUserDetails userDetails, int page, int size) {
@@ -144,7 +144,14 @@ public class ExcuseService {
 
         user.gainXp(earnedXp);
 
-        return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, buildComplexityWarning(parent));
+        return ExcuseResponse.from(
+                excuse,
+                riskFactors,
+                rememberItems,
+                aftermaths,
+                buildComplexityWarning(parent),
+                evolved.replyOptions()
+        );
     }
 
     @Transactional
@@ -157,6 +164,8 @@ public class ExcuseService {
 
         validateOwner(previous, user);
 
+        // FastAPI와 프론트가 모두 5라운드를 상한으로 사용한다. Spring만 10라운드를
+        // 허용하면 6번째 호출이 FastAPI 422로 끝나므로, 호출 전에 같은 정책으로 막는다.
         if (previous.getRoundNumber() >= 5) {
             throw new BusinessException(ErrorCode.MAX_REPLY_ROUND_REACHED);
         }
