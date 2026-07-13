@@ -1,19 +1,19 @@
 package com.asdf.tongchoobe.llm;
 
 import com.asdf.tongchoobe.config.FastApiProperties;
-import com.asdf.tongchoobe.domain.EvolveDirection;
 import com.asdf.tongchoobe.domain.SuspicionLevel;
 import com.asdf.tongchoobe.domain.Target;
 import com.asdf.tongchoobe.domain.Tone;
 import com.asdf.tongchoobe.exception.BusinessException;
 import com.asdf.tongchoobe.exception.ErrorCode;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
-import com.fasterxml.jackson.annotation.JsonAlias;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,9 +27,11 @@ public class FastApiClient {
         factory.setReadTimeout(properties.readTimeoutMs());
         this.restClient = builder.baseUrl(properties.baseUrl())
                 .requestFactory(factory)
-                .defaultHeader("Authorization", "Bearer " + properties.internalToken())
                 .build();
+        this.internalToken = properties.internalToken();
     }
+
+    private final String internalToken;
 
     public GeneratedExcuse create(CreateRequest request) {
         return post("/internal/v1/excuses/create", request);
@@ -45,9 +47,14 @@ public class FastApiClient {
 
     private GeneratedExcuse post(String path, Object request) {
         try {
-            return restClient.post().uri(path)
-                    .header("X-Request-ID", UUID.randomUUID().toString())
-                    .body(request)
+            RestClient.RequestBodySpec spec = restClient.post().uri(path)
+                    .header("X-Request-ID", UUID.randomUUID().toString());
+
+            if (internalToken != null && !internalToken.isBlank()) {
+                spec.header("Authorization", "Bearer " + internalToken);
+            }
+
+            return spec.body(request)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (ignored, response) -> {
                         throw new FastApiException(response.getStatusCode().value());
@@ -74,31 +81,108 @@ public class FastApiClient {
     public record CreateRequest(String situation, Target target, Tone tone) {}
     public record EvolveRequest(String situation, Target target, Tone tone, String rootExcuse,
                                 String currentExcuse, List<ConversationTurn> conversation,
-                                int roundNumber, EvolveDirection direction) {}
+                                int roundNumber, String direction) {}
     public record ReplyRequest(String situation, Target target, Tone tone, String rootExcuse,
                                String currentExcuse, List<ConversationTurn> conversation,
                                int roundNumber, String incomingMessage) {}
-    public record ConversationTurn(String role, String message) {}
+    public record ConversationTurn(String role, String content) {}
 
     public record GeneratedExcuse(
             @JsonAlias({"excuse", "excuse_text"}) String excuseText,
-            @JsonAlias("success_rate") int successRate,
-            int realism, int persuasion,
-            @JsonAlias("suspicion_level") SuspicionLevel suspicionLevel,
-            @JsonAlias("risk_factors") List<Item> riskFactors,
-            @JsonAlias("remember_items") List<Item> rememberItems,
-            List<Aftermath> aftermaths) {
-        public List<Item> riskFactors() { return riskFactors == null ? List.of() : riskFactors; }
-        public List<Item> rememberItems() { return rememberItems == null ? List.of() : rememberItems; }
-        public List<Aftermath> aftermaths() { return aftermaths == null ? List.of() : aftermaths; }
+            @JsonAlias({"successRate", "success_rate"}) Integer rawSuccessRate,
+            Integer rawRealism,
+            Integer rawPersuasion,
+            @JsonAlias({"suspicionLevel", "suspicion_level"}) SuspicionLevel rawSuspicionLevel,
+            Analysis analysis,
+            @JsonAlias("risk_factors") List<Item> legacyRiskFactors,
+            @JsonAlias("remember_items") List<Item> legacyRememberItems,
+            @JsonAlias("remember") List<String> rememberTexts,
+            @JsonAlias({"aftermath", "aftermaths"}) List<Aftermath> rawAftermaths) {
+        public int successRate() {
+            return analysis != null ? analysis.successRate() : valueOrDefault(rawSuccessRate, 50);
+        }
+
+        public int realism() {
+            return analysis != null ? analysis.realism() : valueOrDefault(rawRealism, 3);
+        }
+
+        public int persuasion() {
+            return analysis != null ? analysis.persuasion() : valueOrDefault(rawPersuasion, 3);
+        }
+
+        public SuspicionLevel suspicionLevel() {
+            if (analysis != null && analysis.suspicionLevel() != null) {
+                return analysis.suspicionLevel();
+            }
+            return rawSuspicionLevel == null ? SuspicionLevel.MEDIUM : rawSuspicionLevel;
+        }
+
+        public List<Item> riskFactors() {
+            if (legacyRiskFactors != null && !legacyRiskFactors.isEmpty()) {
+                return legacyRiskFactors;
+            }
+            if (analysis == null || analysis.riskFactors() == null) {
+                return List.of();
+            }
+            return toItems(analysis.riskFactors());
+        }
+
+        public List<Item> rememberItems() {
+            if (legacyRememberItems != null && !legacyRememberItems.isEmpty()) {
+                return legacyRememberItems;
+            }
+            return toItems(rememberTexts);
+        }
+
+        public List<Aftermath> aftermaths() {
+            if (rawAftermaths == null) {
+                return List.of();
+            }
+            List<Aftermath> indexed = new ArrayList<>();
+            for (int index = 0; index < rawAftermaths.size(); index++) {
+                Aftermath item = rawAftermaths.get(index);
+                indexed.add(new Aftermath(
+                        item.whenLabel(),
+                        item.dayOffset(),
+                        item.question(),
+                        item.collapseRate(),
+                        item.sortOrder() == null ? index : item.sortOrder()
+                ));
+            }
+            return indexed;
+        }
+
+        private static int valueOrDefault(Integer value, int defaultValue) {
+            return value == null ? defaultValue : value;
+        }
+
+        private static List<Item> toItems(List<String> texts) {
+            if (texts == null) {
+                return List.of();
+            }
+            List<Item> items = new ArrayList<>();
+            for (int index = 0; index < texts.size(); index++) {
+                items.add(new Item(texts.get(index), index));
+            }
+            return items;
+        }
     }
+
+    public record Analysis(
+            int successRate,
+            int realism,
+            int persuasion,
+            SuspicionLevel suspicionLevel,
+            List<String> riskFactors
+    ) {}
+
     public record Item(String content, @JsonAlias("sort_order") int sortOrder) {}
     public record Aftermath(
             @JsonAlias({"when", "when_label"}) String whenLabel,
             @JsonAlias("day_offset") int dayOffset,
             String question,
             @JsonAlias("collapse_rate") int collapseRate,
-            @JsonAlias("sort_order") int sortOrder) {}
+            @JsonAlias("sort_order") Integer sortOrder) {}
 
     private static class FastApiException extends RuntimeException {
         private final int status;

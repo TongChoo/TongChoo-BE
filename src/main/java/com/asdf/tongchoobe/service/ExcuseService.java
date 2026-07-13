@@ -31,9 +31,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -122,7 +122,7 @@ public class ExcuseService {
 
         FastApiClient.GeneratedExcuse evolved = fastApiClient.evolve(new FastApiClient.EvolveRequest(
                 parent.getSituation(), parent.getTarget(), parent.getTone(), rootExcuse(parent),
-                parent.getExcuseText(), conversation(parent), parent.getRoundNumber(), request.getDirection()));
+                parent.getExcuseText(), conversation(parent), parent.getRoundNumber(), evolveDirectionLabel(request.getDirection())));
         int earnedXp = calculateEarnedXp(evolved.successRate(), evolved.realism(), evolved.persuasion(), parent.getTone());
 
         Excuse excuse = excuseRepository.save(Excuse.builder()
