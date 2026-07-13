@@ -6,6 +6,7 @@ import com.asdf.tongchoobe.dto.request.PasswordUpdateRequest;
 import com.asdf.tongchoobe.dto.response.UserProfileResponse;
 import com.asdf.tongchoobe.exception.BusinessException;
 import com.asdf.tongchoobe.exception.ErrorCode;
+import com.asdf.tongchoobe.repository.ExcuseRepository;
 import com.asdf.tongchoobe.repository.UserRepository;
 import com.asdf.tongchoobe.security.CustomUserDetails;
 import lombok.RequiredArgsConstructor;
@@ -18,11 +19,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class UserService {
     private final UserRepository userRepository;
+    private final ExcuseRepository excuseRepository;
     private final PasswordEncoder passwordEncoder;
 
     public UserProfileResponse getMyProfile(CustomUserDetails userDetails) {
         User user = getCurrentUser(userDetails);
-        return UserProfileResponse.from(user);
+        return toProfileResponse(user);
     }
 
     @Transactional
@@ -35,7 +37,7 @@ public class UserService {
         }
 
         user.changeNickname(newNickname);
-        return UserProfileResponse.from(user);
+        return toProfileResponse(user);
     }
 
     @Transactional
@@ -52,5 +54,12 @@ public class UserService {
     private User getCurrentUser(CustomUserDetails userDetails) {
         return userRepository.findById(userDetails.getUser().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+    }
+
+    private UserProfileResponse toProfileResponse(User user) {
+        int originalExcuseCount = Math.toIntExact(
+                excuseRepository.countByUserIdAndParentIsNullAndReplyToExcuseIsNull(user.getId())
+        );
+        return UserProfileResponse.from(user, originalExcuseCount);
     }
 }

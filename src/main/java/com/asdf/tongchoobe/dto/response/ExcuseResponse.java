@@ -11,6 +11,8 @@ import lombok.Builder;
 import lombok.Getter;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Getter
@@ -29,6 +31,7 @@ public class ExcuseResponse {
     private List<AftermathResponse> aftermath;
     private List<String> remember;
     private List<String> replyOptions;
+    private List<ThreadItemResponse> thread;
     private int earnedXp;
     private ComplexityWarningResponse complexityWarning;
     private Instant createdAt;
@@ -82,10 +85,48 @@ public class ExcuseResponse {
                         .map(ExcuseRememberItem::getContent)
                         .toList())
                 .replyOptions(replyOptions == null ? List.of() : List.copyOf(replyOptions))
+                .thread(buildThread(excuse))
                 .earnedXp(excuse.getEarnedXp())
                 .complexityWarning(complexityWarning)
                 .createdAt(excuse.getCreatedAt())
                 .build();
+    }
+
+    private static List<ThreadItemResponse> buildThread(Excuse current) {
+        List<Excuse> lineage = new ArrayList<>();
+        Excuse cursor = current;
+
+        while (cursor != null) {
+            lineage.add(cursor);
+            cursor = cursor.getParent() != null ? cursor.getParent() : cursor.getReplyToExcuse();
+        }
+
+        Collections.reverse(lineage);
+        return lineage.stream().map(ThreadItemResponse::from).toList();
+    }
+
+    @Getter
+    @Builder
+    public static class ThreadItemResponse {
+        private Long id;
+        private int roundNumber;
+        private String type;
+        private String incomingMessage;
+        private String excuse;
+
+        private static ThreadItemResponse from(Excuse excuse) {
+            String type = excuse.getIncomingMessage() != null
+                    ? "REPLY"
+                    : excuse.getParent() != null ? "EVOLVE" : "ORIGINAL";
+
+            return ThreadItemResponse.builder()
+                    .id(excuse.getId())
+                    .roundNumber(excuse.getRoundNumber())
+                    .type(type)
+                    .incomingMessage(excuse.getIncomingMessage())
+                    .excuse(excuse.getExcuseText())
+                    .build();
+        }
     }
 
     @Getter

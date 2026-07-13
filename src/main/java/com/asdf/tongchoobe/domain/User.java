@@ -64,6 +64,9 @@ public class User {
     public void gainXp(int amount) {
         this.totalXp += amount;
         this.grade = Grade.of(this.totalXp);
+    }
+
+    public void recordExcuseCreation() {
         this.excuseCount++;
     }
 

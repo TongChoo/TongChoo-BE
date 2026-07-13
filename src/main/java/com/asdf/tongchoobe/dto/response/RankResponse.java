@@ -18,7 +18,7 @@ public class RankResponse {
     private Integer xpToNext;
     private int excuseCount;
 
-    public static RankResponse from(User user) {
+    public static RankResponse from(User user, int originalExcuseCount) {
         Grade grade = user.getGrade();
         Grade nextGrade = grade.next();
 
@@ -29,7 +29,7 @@ public class RankResponse {
                 .nextGrade(nextGrade)
                 .nextGradeLabel(nextGrade == null ? null : nextGrade.getLabel())
                 .xpToNext(nextGrade == null ? null : nextGrade.getMinXp() - user.getTotalXp())
-                .excuseCount(user.getExcuseCount())
+                .excuseCount(originalExcuseCount)
                 .build();
     }
 }

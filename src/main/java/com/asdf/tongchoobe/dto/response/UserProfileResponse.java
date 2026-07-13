@@ -22,7 +22,7 @@ public class UserProfileResponse {
     private Instant createdAt;
     private Instant updatedAt;
 
-    public static UserProfileResponse from(User user) {
+    public static UserProfileResponse from(User user, int originalExcuseCount) {
         return UserProfileResponse.builder()
                 .id(user.getId())
                 .email(user.getEmail())
@@ -30,7 +30,7 @@ public class UserProfileResponse {
                 .totalXp(user.getTotalXp())
                 .grade(user.getGrade())
                 .gradeLabel(user.getGrade().getLabel())
-                .excuseCount(user.getExcuseCount())
+                .excuseCount(originalExcuseCount)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();

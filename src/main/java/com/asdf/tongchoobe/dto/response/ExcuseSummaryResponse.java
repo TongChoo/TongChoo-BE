@@ -22,6 +22,7 @@ public class ExcuseSummaryResponse {
     private String situation;
     private Target target;
     private Tone tone;
+    private int roundNumber;
     private int successRate;
     private Integer nextAftermathInDays;
     private Instant createdAt;
@@ -32,6 +33,7 @@ public class ExcuseSummaryResponse {
                 .situation(excuse.getSituation())
                 .target(excuse.getTarget())
                 .tone(excuse.getTone())
+                .roundNumber(excuse.getRoundNumber())
                 .successRate(excuse.getSuccessRate())
                 .nextAftermathInDays(calculateNextAftermathInDays(excuse, aftermaths))
                 .createdAt(excuse.getCreatedAt())

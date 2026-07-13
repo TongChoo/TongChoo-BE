@@ -26,12 +26,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -72,6 +75,7 @@ public class ExcuseService {
         List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(toAftermaths(excuse, generated.aftermaths()));
 
         user.gainXp(earnedXp);
+        user.recordExcuseCreation();
 
         return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, null, generated.replyOptions());
     }
@@ -81,7 +85,16 @@ public class ExcuseService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         Pageable pageable = PageRequest.of(Math.max(page, 0), clamp(size, 1, 50));
-        Page<ExcuseSummaryResponse> summaries = excuseRepository.findByUserIdOrderByCreatedAtDesc(user.getId(), pageable)
+        Map<Long, Excuse> latestByRootId = new LinkedHashMap<>();
+        excuseRepository.findByUserIdOrderByCreatedAtDesc(user.getId())
+                .forEach(excuse -> latestByRootId.putIfAbsent(rootOf(excuse).getId(), excuse));
+
+        List<Excuse> latestExcuses = new ArrayList<>(latestByRootId.values());
+        int start = Math.min((int) pageable.getOffset(), latestExcuses.size());
+        int end = Math.min(start + pageable.getPageSize(), latestExcuses.size());
+        Page<Excuse> latestPage = new PageImpl<>(latestExcuses.subList(start, end), pageable, latestExcuses.size());
+
+        Page<ExcuseSummaryResponse> summaries = latestPage
                 .map(excuse -> ExcuseSummaryResponse.from(
                         excuse,
                         aftermathRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId())
@@ -168,6 +181,11 @@ public class ExcuseService {
         // 허용하면 6번째 호출이 FastAPI 422로 끝나므로, 호출 전에 같은 정책으로 막는다.
         if (previous.getRoundNumber() >= 5) {
             throw new BusinessException(ErrorCode.MAX_REPLY_ROUND_REACHED);
+        }
+
+        String selectedExcuse = request.getCurrentExcuse();
+        if (selectedExcuse != null && !selectedExcuse.isBlank()) {
+            previous.setExcuseText(selectedExcuse.trim());
         }
 
         String incomingMessage = request.getIncomingMessage().trim();
@@ -308,18 +326,18 @@ public class ExcuseService {
         if (depth <= 1) {
             return ExcuseResponse.ComplexityWarningResponse.builder()
                     .enabled(false)
-                    .message("아직 설정이 단순해서 관리하기 쉬운 상태야.")
+                    .message("현재 변명의 설정은 단순한 상태입니다.")
                     .build();
         }
         if (depth <= 3) {
             return ExcuseResponse.ComplexityWarningResponse.builder()
                     .enabled(true)
-                    .message("변명이 여러 번 진화했어. 원본 설정과 말이 충돌하지 않게 조심해.")
+                    .message("변명이 여러 번 수정되어 원본과 내용이 충돌할 가능성이 있습니다.")
                     .build();
         }
         return ExcuseResponse.ComplexityWarningResponse.builder()
                 .enabled(true)
-                .message("변명 설정이 많이 쌓였어. 이제 추가 진화보다 사과/수습 전략이 더 안전할 수 있어.")
+                .message("변명 수정 횟수가 많아 설정 간 충돌 가능성이 높습니다. 추가 수정은 중단하고 사실을 인정하거나 구체적인 수습 방법을 전달하는 것을 권장합니다.")
                 .build();
     }
 
@@ -328,18 +346,18 @@ public class ExcuseService {
         if (roundNumber <= 2) {
             return ExcuseResponse.ComplexityWarningResponse.builder()
                     .enabled(false)
-                    .message("아직 답장 라운드가 낮아서 설정 관리가 가능한 상태야.")
+                    .message("현재 답장 단계에서는 이전 대화 내용을 안정적으로 유지할 수 있습니다.")
                     .build();
         }
         if (roundNumber <= 4) {
             return ExcuseResponse.ComplexityWarningResponse.builder()
                     .enabled(true)
-                    .message("대화가 길어지고 있어. 이전 답변과 말이 충돌하지 않게 조심해.")
+                    .message("답장 대화가 길어져 이전 내용과 충돌할 가능성이 있습니다. 새로운 내용을 추가하기 전에 기존 답변의 이유와 약속을 확인해 주세요.")
                     .build();
         }
         return ExcuseResponse.ComplexityWarningResponse.builder()
                 .enabled(true)
-                .message("최대 라운드에 가까워졌어. 추가 변명보다 수습 전략으로 전환하는 게 안전해.")
+                .message("답장 가능 횟수의 마지막 단계입니다. 추가 변명보다는 사실을 인정하고 구체적인 해결 방법을 전달하는 것을 권장합니다.")
                 .build();
     }
 
