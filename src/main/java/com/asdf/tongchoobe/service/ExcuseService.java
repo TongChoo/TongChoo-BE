@@ -12,6 +12,8 @@ import com.asdf.tongchoobe.domain.User;
 import com.asdf.tongchoobe.dto.request.ExcuseCreateRequest;
 import com.asdf.tongchoobe.dto.request.ExcuseEvolveRequest;
 import com.asdf.tongchoobe.dto.response.ExcuseResponse;
+import com.asdf.tongchoobe.dto.response.ExcuseSummaryResponse;
+import com.asdf.tongchoobe.dto.response.PageResponse;
 import com.asdf.tongchoobe.exception.BusinessException;
 import com.asdf.tongchoobe.exception.ErrorCode;
 import com.asdf.tongchoobe.repository.ExcuseAftermathRepository;
@@ -21,6 +23,9 @@ import com.asdf.tongchoobe.repository.ExcuseRiskFactorRepository;
 import com.asdf.tongchoobe.repository.UserRepository;
 import com.asdf.tongchoobe.security.CustomUserDetails;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -79,6 +84,38 @@ public class ExcuseService {
         return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, null);
     }
 
+    public PageResponse<ExcuseSummaryResponse> getMyExcuses(CustomUserDetails userDetails, int page, int size) {
+        User user = userRepository.findById(userDetails.getUser().getId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        Pageable pageable = PageRequest.of(Math.max(page, 0), clamp(size, 1, 50));
+        Page<ExcuseSummaryResponse> summaries = excuseRepository.findByUserIdOrderByCreatedAtDesc(user.getId(), pageable)
+                .map(excuse -> ExcuseSummaryResponse.from(
+                        excuse,
+                        aftermathRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId())
+                ));
+
+        return PageResponse.of(summaries);
+    }
+
+    public ExcuseResponse getExcuse(Long excuseId, CustomUserDetails userDetails) {
+        User user = userRepository.findById(userDetails.getUser().getId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        Excuse excuse = excuseRepository.findById(excuseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.EXCUSE_NOT_FOUND));
+
+        validateOwner(excuse, user);
+
+        return ExcuseResponse.from(
+                excuse,
+                riskFactorRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
+                rememberItemRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
+                aftermathRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
+                null
+        );
+    }
+
     @Transactional
     public ExcuseResponse evolveExcuse(Long excuseId, ExcuseEvolveRequest request, CustomUserDetails userDetails) {
         User user = userRepository.findById(userDetails.getUser().getId())
@@ -87,9 +124,7 @@ public class ExcuseService {
         Excuse parent = excuseRepository.findById(excuseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.EXCUSE_NOT_FOUND));
 
-        if (!parent.getUser().getId().equals(user.getId())) {
-            throw new BusinessException(ErrorCode.EXCUSE_ACCESS_DENIED);
-        }
+        validateOwner(parent, user);
 
         TemporaryExcuse evolved = evolveTemporaryExcuse(parent, request.getDirection());
         int earnedXp = calculateEarnedXp(evolved.successRate(), evolved.realism(), evolved.persuasion(), parent.getTone());
@@ -132,6 +167,12 @@ public class ExcuseService {
         user.gainXp(earnedXp);
 
         return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, buildComplexityWarning(parent));
+    }
+
+    private void validateOwner(Excuse excuse, User user) {
+        if (!excuse.getUser().getId().equals(user.getId())) {
+            throw new BusinessException(ErrorCode.EXCUSE_ACCESS_DENIED);
+        }
     }
 
     private TemporaryExcuse createTemporaryExcuse(ExcuseCreateRequest request) {
