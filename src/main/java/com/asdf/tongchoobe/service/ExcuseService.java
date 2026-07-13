@@ -17,6 +17,7 @@ import com.asdf.tongchoobe.dto.response.ExcuseSummaryResponse;
 import com.asdf.tongchoobe.dto.response.PageResponse;
 import com.asdf.tongchoobe.exception.BusinessException;
 import com.asdf.tongchoobe.exception.ErrorCode;
+import com.asdf.tongchoobe.llm.FastApiClient;
 import com.asdf.tongchoobe.repository.ExcuseAftermathRepository;
 import com.asdf.tongchoobe.repository.ExcuseRememberItemRepository;
 import com.asdf.tongchoobe.repository.ExcuseRepository;
@@ -31,6 +32,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
 
 @Service
 @RequiredArgsConstructor
@@ -41,44 +44,34 @@ public class ExcuseService {
     private final ExcuseRiskFactorRepository riskFactorRepository;
     private final ExcuseRememberItemRepository rememberItemRepository;
     private final ExcuseAftermathRepository aftermathRepository;
+    private final FastApiClient fastApiClient;
 
     @Transactional
     public ExcuseResponse createExcuse(ExcuseCreateRequest request, CustomUserDetails userDetails) {
         User user = userRepository.findById(userDetails.getUser().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
-        TemporaryExcuse temporaryExcuse = createTemporaryExcuse(request);
-        int earnedXp = calculateEarnedXp(temporaryExcuse.successRate(), temporaryExcuse.realism(), temporaryExcuse.persuasion(), request.getTone());
+        FastApiClient.GeneratedExcuse generated = fastApiClient.create(
+                new FastApiClient.CreateRequest(request.getSituation(), request.getTarget(), request.getTone()));
+        int earnedXp = calculateEarnedXp(generated.successRate(), generated.realism(), generated.persuasion(), request.getTone());
 
         Excuse excuse = excuseRepository.save(Excuse.builder()
                 .user(user)
                 .situation(request.getSituation())
                 .target(request.getTarget())
                 .tone(request.getTone())
-                .excuseText(temporaryExcuse.excuseText())
+                .excuseText(generated.excuseText())
                 .roundNumber(1)
-                .successRate(temporaryExcuse.successRate())
-                .realism(temporaryExcuse.realism())
-                .persuasion(temporaryExcuse.persuasion())
-                .suspicionLevel(temporaryExcuse.suspicionLevel())
+                .successRate(generated.successRate())
+                .realism(generated.realism())
+                .persuasion(generated.persuasion())
+                .suspicionLevel(generated.suspicionLevel())
                 .earnedXp(earnedXp)
                 .build());
 
-        List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(buildTemporaryRiskFactors(
-                excuse,
-                request.getTarget(),
-                request.getTone(),
-                temporaryExcuse.successRate()
-        ));
-
-        List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(buildTemporaryRememberItems(excuse, request));
-
-        List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(buildTemporaryAftermaths(
-                excuse,
-                request.getTarget(),
-                request.getTone(),
-                temporaryExcuse.successRate()
-        ));
+        List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(toRiskFactors(excuse, generated.riskFactors()));
+        List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(toRememberItems(excuse, generated.rememberItems()));
+        List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(toAftermaths(excuse, generated.aftermaths()));
 
         user.gainXp(earnedXp);
 
@@ -127,7 +120,9 @@ public class ExcuseService {
 
         validateOwner(parent, user);
 
-        TemporaryExcuse evolved = evolveTemporaryExcuse(parent, request.getDirection());
+        FastApiClient.GeneratedExcuse evolved = fastApiClient.evolve(new FastApiClient.EvolveRequest(
+                parent.getSituation(), parent.getTarget(), parent.getTone(), rootExcuse(parent),
+                parent.getExcuseText(), conversation(parent), parent.getRoundNumber(), request.getDirection()));
         int earnedXp = calculateEarnedXp(evolved.successRate(), evolved.realism(), evolved.persuasion(), parent.getTone());
 
         Excuse excuse = excuseRepository.save(Excuse.builder()
@@ -145,25 +140,9 @@ public class ExcuseService {
                 .earnedXp(earnedXp)
                 .build());
 
-        List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(buildTemporaryRiskFactors(
-                excuse,
-                excuse.getTarget(),
-                excuse.getTone(),
-                evolved.successRate()
-        ));
-
-        List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(buildEvolvedRememberItems(
-                excuse,
-                parent,
-                request.getDirection()
-        ));
-
-        List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(buildTemporaryAftermaths(
-                excuse,
-                excuse.getTarget(),
-                excuse.getTone(),
-                evolved.successRate()
-        ));
+        List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(toRiskFactors(excuse, evolved.riskFactors()));
+        List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(toRememberItems(excuse, evolved.rememberItems()));
+        List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(toAftermaths(excuse, evolved.aftermaths()));
 
         user.gainXp(earnedXp);
 
@@ -180,11 +159,14 @@ public class ExcuseService {
 
         validateOwner(previous, user);
 
-        if (previous.getRoundNumber() >= 5) {
+        if (previous.getRoundNumber() >= 10) {
             throw new BusinessException(ErrorCode.MAX_REPLY_ROUND_REACHED);
         }
 
-        TemporaryExcuse reply = createTemporaryReply(previous, request.getIncomingMessage());
+        FastApiClient.GeneratedExcuse reply = fastApiClient.reply(new FastApiClient.ReplyRequest(
+                previous.getSituation(), previous.getTarget(), previous.getTone(), rootExcuse(previous),
+                previous.getExcuseText(), conversation(previous), previous.getRoundNumber() + 1,
+                request.getIncomingMessage().trim()));
         int earnedXp = calculateEarnedXp(reply.successRate(), reply.realism(), reply.persuasion(), previous.getTone());
 
         Excuse excuse = excuseRepository.save(Excuse.builder()
@@ -203,28 +185,82 @@ public class ExcuseService {
                 .earnedXp(earnedXp)
                 .build());
 
-        List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(buildReplyRiskFactors(
-                excuse,
-                previous,
-                reply.successRate()
-        ));
-
-        List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(buildReplyRememberItems(
-                excuse,
-                previous,
-                request.getIncomingMessage()
-        ));
-
-        List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(buildTemporaryAftermaths(
-                excuse,
-                excuse.getTarget(),
-                excuse.getTone(),
-                reply.successRate()
-        ));
+        List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(toRiskFactors(excuse, reply.riskFactors()));
+        List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(toRememberItems(excuse, reply.rememberItems()));
+        List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(toAftermaths(excuse, reply.aftermaths()));
 
         user.gainXp(earnedXp);
 
         return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, buildReplyComplexityWarning(previous));
+    }
+
+    private List<ExcuseRiskFactor> toRiskFactors(Excuse excuse, List<FastApiClient.Item> items) {
+        return items.stream()
+                .map(item -> ExcuseRiskFactor.builder()
+                        .excuse(excuse)
+                        .content(item.content())
+                        .sortOrder(item.sortOrder())
+                        .build())
+                .toList();
+    }
+
+    private List<ExcuseRememberItem> toRememberItems(Excuse excuse, List<FastApiClient.Item> items) {
+        return items.stream()
+                .map(item -> ExcuseRememberItem.builder()
+                        .excuse(excuse)
+                        .content(item.content())
+                        .sortOrder(item.sortOrder())
+                        .build())
+                .toList();
+    }
+
+    private List<ExcuseAftermath> toAftermaths(Excuse excuse, List<FastApiClient.Aftermath> items) {
+        return items.stream()
+                .map(item -> ExcuseAftermath.builder()
+                        .excuse(excuse)
+                        .whenLabel(item.whenLabel())
+                        .dayOffset(item.dayOffset())
+                        .question(item.question())
+                        .collapseRate(item.collapseRate())
+                        .sortOrder(item.sortOrder())
+                        .build())
+                .toList();
+    }
+
+    private String rootExcuse(Excuse excuse) {
+        Excuse root = rootOf(excuse);
+        return root.getExcuseText();
+    }
+
+    private Excuse rootOf(Excuse excuse) {
+        Excuse cursor = excuse;
+        while (parentOf(cursor) != null) {
+            cursor = parentOf(cursor);
+        }
+        return cursor;
+    }
+
+    private List<FastApiClient.ConversationTurn> conversation(Excuse current) {
+        List<Excuse> lineage = new ArrayList<>();
+        Excuse cursor = current;
+        while (cursor != null) {
+            lineage.add(cursor);
+            cursor = parentOf(cursor);
+        }
+        Collections.reverse(lineage);
+
+        List<FastApiClient.ConversationTurn> conversation = new ArrayList<>();
+        for (Excuse excuse : lineage) {
+            if (excuse.getIncomingMessage() != null && !excuse.getIncomingMessage().isBlank()) {
+                conversation.add(new FastApiClient.ConversationTurn("user", excuse.getIncomingMessage()));
+            }
+            conversation.add(new FastApiClient.ConversationTurn("assistant", excuse.getExcuseText()));
+        }
+        return conversation;
+    }
+
+    private Excuse parentOf(Excuse excuse) {
+        return excuse.getParent() != null ? excuse.getParent() : excuse.getReplyToExcuse();
     }
 
     private void validateOwner(Excuse excuse, User user) {

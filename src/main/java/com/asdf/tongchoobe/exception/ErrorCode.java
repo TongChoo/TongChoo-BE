@@ -27,10 +27,13 @@ public enum ErrorCode {
 
     EXCUSE_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 변명입니다."),
     EXCUSE_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인이 생성한 변명만 조회/진화할 수 있습니다."),
-    MAX_REPLY_ROUND_REACHED(HttpStatus.CONFLICT, "최대 5라운드까지만 답장을 준비할 수 있습니다."),
+    MAX_REPLY_ROUND_REACHED(HttpStatus.CONFLICT, "최대 10라운드까지만 답장을 준비할 수 있습니다."),
 
     LLM_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "AI 변명 생성에 실패했습니다. 잠시 후 다시 시도해주세요."),
-    LLM_PARSE_ERROR(HttpStatus.UNPROCESSABLE_ENTITY, "AI 응답을 해석하지 못했습니다. 다시 시도해주세요.");
+    LLM_PARSE_ERROR(HttpStatus.UNPROCESSABLE_ENTITY, "AI 응답을 해석하지 못했습니다. 다시 시도해주세요."),
+    AI_INTERNAL_TOKEN_INVALID(HttpStatus.INTERNAL_SERVER_ERROR, "AI 서버 내부 토큰 설정이 올바르지 않습니다."),
+    AI_QUOTA_EXCEEDED(HttpStatus.BAD_GATEWAY, "AI 서비스 결제 또는 quota를 확인해주세요."),
+    AI_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "AI 사용량 제한에 도달했습니다. 잠시 후 다시 시도해주세요.");
 
     private final HttpStatus httpStatus;
     private final String message;
