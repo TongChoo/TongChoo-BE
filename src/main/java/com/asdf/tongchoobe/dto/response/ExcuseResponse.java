@@ -20,17 +20,19 @@ import java.util.List;
 @Schema(description = "변명 생성 결과")
 public class ExcuseResponse {
     private Long id;
-    private Long parentId;
     private Long replyToExcuseId;
     private String incomingMessage;
     private int roundNumber;
+    private String situation;
     private String excuse;
     private Target target;
+    private String targetDescription;
     private Tone tone;
     private AnalysisResponse analysis;
     private List<AftermathResponse> aftermath;
     private List<String> remember;
     private List<String> replyOptions;
+    private int selectedOptionIndex;
     private List<ThreadItemResponse> thread;
     private int earnedXp;
     private ComplexityWarningResponse complexityWarning;
@@ -43,7 +45,7 @@ public class ExcuseResponse {
             List<ExcuseAftermath> aftermaths,
             ComplexityWarningResponse complexityWarning
     ) {
-        return from(excuse, riskFactors, rememberItems, aftermaths, complexityWarning, List.of());
+        return from(excuse, riskFactors, rememberItems, aftermaths, complexityWarning, List.of(), 0);
     }
 
     /**
@@ -60,14 +62,27 @@ public class ExcuseResponse {
             ComplexityWarningResponse complexityWarning,
             List<String> replyOptions
     ) {
+        return from(excuse, riskFactors, rememberItems, aftermaths, complexityWarning, replyOptions, 0);
+    }
+
+    public static ExcuseResponse from(
+            Excuse excuse,
+            List<ExcuseRiskFactor> riskFactors,
+            List<ExcuseRememberItem> rememberItems,
+            List<ExcuseAftermath> aftermaths,
+            ComplexityWarningResponse complexityWarning,
+            List<String> replyOptions,
+            int selectedOptionIndex
+    ) {
         return ExcuseResponse.builder()
                 .id(excuse.getId())
-                .parentId(excuse.getParent() == null ? null : excuse.getParent().getId())
                 .replyToExcuseId(excuse.getReplyToExcuse() == null ? null : excuse.getReplyToExcuse().getId())
                 .incomingMessage(excuse.getIncomingMessage())
                 .roundNumber(excuse.getRoundNumber())
+                .situation(excuse.getSituation())
                 .excuse(excuse.getExcuseText())
                 .target(excuse.getTarget())
+                .targetDescription(excuse.getTargetDescription())
                 .tone(excuse.getTone())
                 .analysis(AnalysisResponse.builder()
                         .successRate(excuse.getSuccessRate())
@@ -85,6 +100,7 @@ public class ExcuseResponse {
                         .map(ExcuseRememberItem::getContent)
                         .toList())
                 .replyOptions(replyOptions == null ? List.of() : List.copyOf(replyOptions))
+                .selectedOptionIndex(Math.max(selectedOptionIndex, 0))
                 .thread(buildThread(excuse))
                 .earnedXp(excuse.getEarnedXp())
                 .complexityWarning(complexityWarning)
@@ -98,7 +114,7 @@ public class ExcuseResponse {
 
         while (cursor != null) {
             lineage.add(cursor);
-            cursor = cursor.getParent() != null ? cursor.getParent() : cursor.getReplyToExcuse();
+            cursor = cursor.getReplyToExcuse();
         }
 
         Collections.reverse(lineage);
@@ -115,9 +131,7 @@ public class ExcuseResponse {
         private String excuse;
 
         private static ThreadItemResponse from(Excuse excuse) {
-            String type = excuse.getIncomingMessage() != null
-                    ? "REPLY"
-                    : excuse.getParent() != null ? "EVOLVE" : "ORIGINAL";
+            String type = excuse.getIncomingMessage() != null ? "REPLY" : "ORIGINAL";
 
             return ThreadItemResponse.builder()
                     .id(excuse.getId())

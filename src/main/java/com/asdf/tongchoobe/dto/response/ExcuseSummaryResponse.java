@@ -21,6 +21,7 @@ public class ExcuseSummaryResponse {
     private Long id;
     private String situation;
     private Target target;
+    private String targetDescription;
     private Tone tone;
     private int roundNumber;
     private int successRate;
@@ -32,6 +33,7 @@ public class ExcuseSummaryResponse {
                 .id(excuse.getId())
                 .situation(excuse.getSituation())
                 .target(excuse.getTarget())
+                .targetDescription(excuse.getTargetDescription())
                 .tone(excuse.getTone())
                 .roundNumber(excuse.getRoundNumber())
                 .successRate(excuse.getSuccessRate())

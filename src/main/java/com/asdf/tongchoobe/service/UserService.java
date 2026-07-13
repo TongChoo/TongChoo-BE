@@ -58,7 +58,7 @@ public class UserService {
 
     private UserProfileResponse toProfileResponse(User user) {
         int originalExcuseCount = Math.toIntExact(
-                excuseRepository.countByUserIdAndParentIsNullAndReplyToExcuseIsNull(user.getId())
+                excuseRepository.countByUserIdAndReplyToExcuseIsNull(user.getId())
         );
         return UserProfileResponse.from(user, originalExcuseCount);
     }

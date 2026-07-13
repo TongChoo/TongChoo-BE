@@ -1,8 +1,8 @@
 package com.asdf.tongchoobe.controller;
 
 import com.asdf.tongchoobe.dto.request.ExcuseCreateRequest;
-import com.asdf.tongchoobe.dto.request.ExcuseEvolveRequest;
 import com.asdf.tongchoobe.dto.request.ExcuseReplyRequest;
+import com.asdf.tongchoobe.dto.request.ExcuseSelectionRequest;
 import com.asdf.tongchoobe.dto.response.ApiResponse;
 import com.asdf.tongchoobe.dto.response.ExcuseResponse;
 import com.asdf.tongchoobe.dto.response.ExcuseSummaryResponse;
@@ -17,6 +17,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -54,16 +55,6 @@ public class ExcuseController {
         return ResponseEntity.ok(ApiResponse.success(excuseService.getExcuse(id, userDetails)));
     }
 
-    @PostMapping("/{id}/evolve")
-    public ResponseEntity<ApiResponse<ExcuseResponse>> evolveExcuse(
-            @PathVariable Long id,
-            @AuthenticationPrincipal CustomUserDetails userDetails,
-            @Valid @RequestBody ExcuseEvolveRequest request
-    ) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.created(excuseService.evolveExcuse(id, request, userDetails)));
-    }
-
     @PostMapping("/{id}/reply")
     public ResponseEntity<ApiResponse<ExcuseResponse>> replyToExcuse(
             @PathVariable Long id,
@@ -72,5 +63,16 @@ public class ExcuseController {
     ) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created(excuseService.replyToExcuse(id, request, userDetails)));
+    }
+
+    @PatchMapping("/{id}/selection")
+    public ResponseEntity<ApiResponse<ExcuseResponse>> selectReplyOption(
+            @PathVariable Long id,
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @Valid @RequestBody ExcuseSelectionRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(
+                excuseService.selectReplyOption(id, request, userDetails)
+        ));
     }
 }

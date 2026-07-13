@@ -23,8 +23,10 @@ public enum ErrorCode {
     INVALID_CURRENT_PASSWORD(HttpStatus.BAD_REQUEST, "현재 비밀번호가 올바르지 않습니다."),
 
     EXCUSE_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 변명입니다."),
-    EXCUSE_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인이 생성한 변명만 조회/진화할 수 있습니다."),
+    EXCUSE_ACCESS_DENIED(HttpStatus.FORBIDDEN, "본인이 생성한 변명만 조회하거나 답장을 준비할 수 있습니다."),
     MAX_REPLY_ROUND_REACHED(HttpStatus.CONFLICT, "최대 5라운드까지만 답장을 준비할 수 있습니다."),
+    EXCUSE_NOT_LATEST(HttpStatus.CONFLICT, "가장 최근 라운드에서만 답장을 선택하거나 다음 답장을 준비할 수 있습니다."),
+    REPLY_OPTION_NOT_FOUND(HttpStatus.BAD_REQUEST, "AI가 제안한 답장 후보 중 하나를 선택해주세요."),
 
     LLM_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "AI 변명 생성에 실패했습니다. 잠시 후 다시 시도해주세요."),
     LLM_PARSE_ERROR(HttpStatus.UNPROCESSABLE_ENTITY, "AI 응답을 해석하지 못했습니다. 다시 시도해주세요."),

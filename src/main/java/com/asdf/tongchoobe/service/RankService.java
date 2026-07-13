@@ -23,7 +23,7 @@ public class RankService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         int originalExcuseCount = Math.toIntExact(
-                excuseRepository.countByUserIdAndParentIsNullAndReplyToExcuseIsNull(user.getId())
+                excuseRepository.countByUserIdAndReplyToExcuseIsNull(user.getId())
         );
         return RankResponse.from(user, originalExcuseCount);
     }

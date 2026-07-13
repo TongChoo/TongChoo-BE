@@ -12,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -26,7 +27,13 @@ import java.time.Instant;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "excuses")
+@Table(
+        name = "excuses",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_excuses_reply_to_excuse_id",
+                columnNames = "reply_to_excuse_id"
+        )
+)
 @EntityListeners(AuditingEntityListener.class)
 public class Excuse {
     @Id
@@ -38,10 +45,6 @@ public class Excuse {
     private User user;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "parent_id")
-    private Excuse parent;
-
-    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reply_to_excuse_id")
     private Excuse replyToExcuse;
 
@@ -51,6 +54,9 @@ public class Excuse {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Target target;
+
+    @Column(name = "target_description", length = 100)
+    private String targetDescription;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

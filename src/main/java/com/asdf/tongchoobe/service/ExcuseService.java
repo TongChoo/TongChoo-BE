@@ -4,12 +4,13 @@ import com.asdf.tongchoobe.domain.Excuse;
 import com.asdf.tongchoobe.domain.ExcuseAftermath;
 import com.asdf.tongchoobe.domain.ExcuseRememberItem;
 import com.asdf.tongchoobe.domain.ExcuseRiskFactor;
-import com.asdf.tongchoobe.domain.EvolveDirection;
+import com.asdf.tongchoobe.domain.ExcuseReplyOption;
+import com.asdf.tongchoobe.domain.Target;
 import com.asdf.tongchoobe.domain.Tone;
 import com.asdf.tongchoobe.domain.User;
 import com.asdf.tongchoobe.dto.request.ExcuseCreateRequest;
-import com.asdf.tongchoobe.dto.request.ExcuseEvolveRequest;
 import com.asdf.tongchoobe.dto.request.ExcuseReplyRequest;
+import com.asdf.tongchoobe.dto.request.ExcuseSelectionRequest;
 import com.asdf.tongchoobe.dto.response.ExcuseResponse;
 import com.asdf.tongchoobe.dto.response.ExcuseSummaryResponse;
 import com.asdf.tongchoobe.dto.response.PageResponse;
@@ -20,6 +21,7 @@ import com.asdf.tongchoobe.repository.ExcuseAftermathRepository;
 import com.asdf.tongchoobe.repository.ExcuseRememberItemRepository;
 import com.asdf.tongchoobe.repository.ExcuseRepository;
 import com.asdf.tongchoobe.repository.ExcuseRiskFactorRepository;
+import com.asdf.tongchoobe.repository.ExcuseReplyOptionRepository;
 import com.asdf.tongchoobe.repository.UserRepository;
 import com.asdf.tongchoobe.security.CustomUserDetails;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +29,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,7 +37,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -45,6 +50,7 @@ public class ExcuseService {
     private final ExcuseRiskFactorRepository riskFactorRepository;
     private final ExcuseRememberItemRepository rememberItemRepository;
     private final ExcuseAftermathRepository aftermathRepository;
+    private final ExcuseReplyOptionRepository replyOptionRepository;
     private final FastApiClient fastApiClient;
 
     @Transactional
@@ -53,13 +59,18 @@ public class ExcuseService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         FastApiClient.GeneratedExcuse generated = fastApiClient.create(
-                new FastApiClient.CreateRequest(request.getSituation(), request.getTarget(), request.getTone()));
+                new FastApiClient.CreateRequest(
+                        request.getSituation(),
+                        request.getTarget(),
+                        normalizeTargetDescription(request.getTarget(), request.getTargetDescription()),
+                        request.getTone()));
         int earnedXp = calculateEarnedXp(generated.successRate(), generated.realism(), generated.persuasion(), request.getTone());
 
         Excuse excuse = excuseRepository.save(Excuse.builder()
                 .user(user)
                 .situation(request.getSituation())
                 .target(request.getTarget())
+                .targetDescription(normalizeTargetDescription(request.getTarget(), request.getTargetDescription()))
                 .tone(request.getTone())
                 .excuseText(generated.excuseText())
                 .roundNumber(1)
@@ -73,11 +84,12 @@ public class ExcuseService {
         List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(toRiskFactors(excuse, generated.riskFactors()));
         List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(toRememberItems(excuse, generated.rememberItems()));
         List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(toAftermaths(excuse, generated.aftermaths()));
+        List<ExcuseReplyOption> replyOptions = saveReplyOptions(excuse, generated.excuseText(), generated.replyOptions());
 
         user.gainXp(earnedXp);
         user.recordExcuseCreation();
 
-        return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, null, generated.replyOptions());
+        return response(excuse, riskFactors, rememberItems, aftermaths, null, replyOptions);
     }
 
     public PageResponse<ExcuseSummaryResponse> getMyExcuses(CustomUserDetails userDetails, int page, int size) {
@@ -112,58 +124,38 @@ public class ExcuseService {
 
         validateOwner(excuse, user);
 
-        return ExcuseResponse.from(
+        return response(
                 excuse,
                 riskFactorRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
                 rememberItemRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
                 aftermathRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
-                null
+                null,
+                replyOptionRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId())
         );
     }
 
     @Transactional
-    public ExcuseResponse evolveExcuse(Long excuseId, ExcuseEvolveRequest request, CustomUserDetails userDetails) {
+    public ExcuseResponse selectReplyOption(
+            Long excuseId,
+            ExcuseSelectionRequest request,
+            CustomUserDetails userDetails
+    ) {
         User user = userRepository.findById(userDetails.getUser().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
-
-        Excuse parent = excuseRepository.findById(excuseId)
+        Excuse excuse = excuseRepository.findByIdForUpdate(excuseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.EXCUSE_NOT_FOUND));
 
-        validateOwner(parent, user);
+        validateOwner(excuse, user);
+        validateLatestRound(excuse);
+        List<ExcuseReplyOption> options = applySelection(excuse, request.getSelectedExcuse());
 
-        FastApiClient.GeneratedExcuse evolved = fastApiClient.evolve(new FastApiClient.EvolveRequest(
-                parent.getSituation(), parent.getTarget(), parent.getTone(), rootExcuse(parent),
-                parent.getExcuseText(), conversation(parent), parent.getRoundNumber(), evolveDirectionLabel(request.getDirection())));
-        int earnedXp = calculateEarnedXp(evolved.successRate(), evolved.realism(), evolved.persuasion(), parent.getTone());
-
-        Excuse excuse = excuseRepository.save(Excuse.builder()
-                .user(user)
-                .parent(parent)
-                .situation(parent.getSituation())
-                .target(parent.getTarget())
-                .tone(parent.getTone())
-                .excuseText(evolved.excuseText())
-                .roundNumber(parent.getRoundNumber())
-                .successRate(evolved.successRate())
-                .realism(evolved.realism())
-                .persuasion(evolved.persuasion())
-                .suspicionLevel(evolved.suspicionLevel())
-                .earnedXp(earnedXp)
-                .build());
-
-        List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(toRiskFactors(excuse, evolved.riskFactors()));
-        List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(toRememberItems(excuse, evolved.rememberItems()));
-        List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(toAftermaths(excuse, evolved.aftermaths()));
-
-        user.gainXp(earnedXp);
-
-        return ExcuseResponse.from(
+        return response(
                 excuse,
-                riskFactors,
-                rememberItems,
-                aftermaths,
-                buildComplexityWarning(parent),
-                evolved.replyOptions()
+                riskFactorRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
+                rememberItemRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
+                aftermathRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId()),
+                null,
+                options
         );
     }
 
@@ -172,10 +164,11 @@ public class ExcuseService {
         User user = userRepository.findById(userDetails.getUser().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
-        Excuse previous = excuseRepository.findById(excuseId)
+        Excuse previous = excuseRepository.findByIdForUpdate(excuseId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.EXCUSE_NOT_FOUND));
 
         validateOwner(previous, user);
+        validateLatestRound(previous);
 
         // FastAPI와 프론트가 모두 5라운드를 상한으로 사용한다. Spring만 10라운드를
         // 허용하면 6번째 호출이 FastAPI 422로 끝나므로, 호출 전에 같은 정책으로 막는다.
@@ -185,7 +178,7 @@ public class ExcuseService {
 
         String selectedExcuse = request.getCurrentExcuse();
         if (selectedExcuse != null && !selectedExcuse.isBlank()) {
-            previous.setExcuseText(selectedExcuse.trim());
+            applySelection(previous, selectedExcuse);
         }
 
         String incomingMessage = request.getIncomingMessage().trim();
@@ -195,40 +188,146 @@ public class ExcuseService {
         conversation.add(new FastApiClient.ConversationTurn("user", incomingMessage));
 
         FastApiClient.GeneratedExcuse reply = fastApiClient.reply(new FastApiClient.ReplyRequest(
-                previous.getSituation(), previous.getTarget(), previous.getTone(), rootExcuse(previous),
+                previous.getSituation(), previous.getTarget(), previous.getTargetDescription(), previous.getTone(), rootExcuse(previous),
                 previous.getExcuseText(), conversation, previous.getRoundNumber() + 1,
                 incomingMessage));
         int earnedXp = calculateEarnedXp(reply.successRate(), reply.realism(), reply.persuasion(), previous.getTone());
 
-        Excuse excuse = excuseRepository.save(Excuse.builder()
-                .user(user)
-                .replyToExcuse(previous)
-                .situation(previous.getSituation())
-                .target(previous.getTarget())
-                .tone(previous.getTone())
-                .excuseText(reply.excuseText())
-                .incomingMessage(incomingMessage)
-                .roundNumber(previous.getRoundNumber() + 1)
-                .successRate(reply.successRate())
-                .realism(reply.realism())
-                .persuasion(reply.persuasion())
-                .suspicionLevel(reply.suspicionLevel())
-                .earnedXp(earnedXp)
-                .build());
+        Excuse excuse;
+        try {
+            excuse = excuseRepository.saveAndFlush(Excuse.builder()
+                    .user(user)
+                    .replyToExcuse(previous)
+                    .situation(previous.getSituation())
+                    .target(previous.getTarget())
+                    .targetDescription(previous.getTargetDescription())
+                    .tone(previous.getTone())
+                    .excuseText(reply.excuseText())
+                    .incomingMessage(incomingMessage)
+                    .roundNumber(previous.getRoundNumber() + 1)
+                    .successRate(reply.successRate())
+                    .realism(reply.realism())
+                    .persuasion(reply.persuasion())
+                    .suspicionLevel(reply.suspicionLevel())
+                    .earnedXp(earnedXp)
+                    .build());
+        } catch (DataIntegrityViolationException exception) {
+            throw new BusinessException(ErrorCode.EXCUSE_NOT_LATEST);
+        }
 
         List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(toRiskFactors(excuse, reply.riskFactors()));
         List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(toRememberItems(excuse, reply.rememberItems()));
         List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(toAftermaths(excuse, reply.aftermaths()));
+        List<ExcuseReplyOption> replyOptions = saveReplyOptions(excuse, reply.excuseText(), reply.replyOptions());
 
         user.gainXp(earnedXp);
 
-        return ExcuseResponse.from(
+        return response(
                 excuse,
                 riskFactors,
                 rememberItems,
                 aftermaths,
                 buildReplyComplexityWarning(previous),
-                reply.replyOptions()
+                replyOptions
+        );
+    }
+
+    private void validateLatestRound(Excuse excuse) {
+        if (excuseRepository.existsByReplyToExcuseId(excuse.getId())) {
+            throw new BusinessException(ErrorCode.EXCUSE_NOT_LATEST);
+        }
+    }
+
+    private String normalizeTargetDescription(Target target, String description) {
+        if (target != Target.CUSTOM || description == null) {
+            return null;
+        }
+        return description.trim();
+    }
+
+    private List<ExcuseReplyOption> applySelection(Excuse excuse, String selectedExcuse) {
+        String selectedText = selectedExcuse.trim();
+        List<ExcuseReplyOption> options = replyOptionRepository
+                .findByExcuseIdOrderBySortOrderAsc(excuse.getId());
+
+        if (options.isEmpty()) {
+            ExcuseReplyOption legacyOption = replyOptionRepository.save(ExcuseReplyOption.builder()
+                    .excuse(excuse)
+                    .optionText(selectedText)
+                    .sortOrder(0)
+                    .selected(true)
+                    .build());
+            excuse.setExcuseText(selectedText);
+            return List.of(legacyOption);
+        }
+
+        ExcuseReplyOption selected = options.stream()
+                .filter(option -> option.getOptionText().equals(selectedText))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(ErrorCode.REPLY_OPTION_NOT_FOUND));
+
+        options.forEach(ExcuseReplyOption::unselect);
+        selected.select();
+        excuse.setExcuseText(selected.getOptionText());
+        return options;
+    }
+
+    private List<ExcuseReplyOption> saveReplyOptions(
+            Excuse excuse,
+            String primary,
+            List<String> generatedOptions
+    ) {
+        Set<String> uniqueOptions = new LinkedHashSet<>();
+        if (primary != null && !primary.isBlank()) {
+            uniqueOptions.add(primary.trim());
+        }
+        if (generatedOptions != null) {
+            generatedOptions.stream()
+                    .filter(option -> option != null && !option.isBlank())
+                    .map(String::trim)
+                    .forEach(uniqueOptions::add);
+        }
+
+        List<ExcuseReplyOption> options = new ArrayList<>();
+        int sortOrder = 0;
+        for (String option : uniqueOptions) {
+            options.add(ExcuseReplyOption.builder()
+                    .excuse(excuse)
+                    .optionText(option)
+                    .sortOrder(sortOrder)
+                    .selected(sortOrder == 0)
+                    .build());
+            sortOrder++;
+        }
+        return replyOptionRepository.saveAll(options);
+    }
+
+    private ExcuseResponse response(
+            Excuse excuse,
+            List<ExcuseRiskFactor> riskFactors,
+            List<ExcuseRememberItem> rememberItems,
+            List<ExcuseAftermath> aftermaths,
+            ExcuseResponse.ComplexityWarningResponse complexityWarning,
+            List<ExcuseReplyOption> options
+    ) {
+        List<String> optionTexts = options.stream()
+                .map(ExcuseReplyOption::getOptionText)
+                .toList();
+        int selectedOptionIndex = 0;
+        for (int index = 0; index < options.size(); index++) {
+            if (options.get(index).isSelected()) {
+                selectedOptionIndex = index;
+                break;
+            }
+        }
+        return ExcuseResponse.from(
+                excuse,
+                riskFactors,
+                rememberItems,
+                aftermaths,
+                complexityWarning,
+                optionTexts,
+                selectedOptionIndex
         );
     }
 
@@ -272,8 +371,8 @@ public class ExcuseService {
 
     private Excuse rootOf(Excuse excuse) {
         Excuse cursor = excuse;
-        while (parentOf(cursor) != null) {
-            cursor = parentOf(cursor);
+        while (previousRoundOf(cursor) != null) {
+            cursor = previousRoundOf(cursor);
         }
         return cursor;
     }
@@ -283,7 +382,7 @@ public class ExcuseService {
         Excuse cursor = current;
         while (cursor != null) {
             lineage.add(cursor);
-            cursor = parentOf(cursor);
+            cursor = previousRoundOf(cursor);
         }
         Collections.reverse(lineage);
 
@@ -297,8 +396,8 @@ public class ExcuseService {
         return conversation;
     }
 
-    private Excuse parentOf(Excuse excuse) {
-        return excuse.getParent() != null ? excuse.getParent() : excuse.getReplyToExcuse();
+    private Excuse previousRoundOf(Excuse excuse) {
+        return excuse.getReplyToExcuse();
     }
 
     private void validateOwner(Excuse excuse, User user) {
@@ -309,36 +408,6 @@ public class ExcuseService {
 
     private int calculateEarnedXp(int successRate, int realism, int persuasion, Tone tone) {
         return (int) Math.round(successRate * 0.6 + realism * 8 + persuasion * 8) + tone.getXpBonus();
-    }
-
-    private String evolveDirectionLabel(EvolveDirection direction) {
-        return switch (direction) {
-            case MORE_PLAUSIBLE -> "더 그럴듯하게";
-            case MORE_EMOTIONAL -> "더 감성적으로";
-            case SHORTER -> "더 짧게";
-            case DODGE_BLAME -> "책임 회피";
-            case MORE_SHAMELESS -> "더 뻔뻔하게";
-        };
-    }
-
-    private ExcuseResponse.ComplexityWarningResponse buildComplexityWarning(Excuse parent) {
-        int depth = calculateParentDepth(parent);
-        if (depth <= 1) {
-            return ExcuseResponse.ComplexityWarningResponse.builder()
-                    .enabled(false)
-                    .message("현재 변명의 설정은 단순한 상태입니다.")
-                    .build();
-        }
-        if (depth <= 3) {
-            return ExcuseResponse.ComplexityWarningResponse.builder()
-                    .enabled(true)
-                    .message("변명이 여러 번 수정되어 원본과 내용이 충돌할 가능성이 있습니다.")
-                    .build();
-        }
-        return ExcuseResponse.ComplexityWarningResponse.builder()
-                .enabled(true)
-                .message("변명 수정 횟수가 많아 설정 간 충돌 가능성이 높습니다. 추가 수정은 중단하고 사실을 인정하거나 구체적인 수습 방법을 전달하는 것을 권장합니다.")
-                .build();
     }
 
     private ExcuseResponse.ComplexityWarningResponse buildReplyComplexityWarning(Excuse previous) {
@@ -359,16 +428,6 @@ public class ExcuseService {
                 .enabled(true)
                 .message("답장 가능 횟수의 마지막 단계입니다. 추가 변명보다는 사실을 인정하고 구체적인 해결 방법을 전달하는 것을 권장합니다.")
                 .build();
-    }
-
-    private int calculateParentDepth(Excuse excuse) {
-        int depth = 1;
-        Excuse cursor = excuse;
-        while (cursor.getParent() != null) {
-            depth++;
-            cursor = cursor.getParent();
-        }
-        return depth;
     }
 
     private int clamp(int value, int min, int max) {

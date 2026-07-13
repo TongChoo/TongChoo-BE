@@ -6,5 +6,6 @@ public enum Target {
     FRIEND,
     LOVER,
     TEAM_LEAD,
-    TEAM_MEMBER
+    TEAM_MEMBER,
+    CUSTOM
 }

@@ -37,10 +37,6 @@ public class FastApiClient {
         return post("/internal/v1/excuses/create", request);
     }
 
-    public GeneratedExcuse evolve(EvolveRequest request) {
-        return post("/internal/v1/excuses/evolve", request);
-    }
-
     public GeneratedExcuse reply(ReplyRequest request) {
         return post("/internal/v1/excuses/reply", request);
     }
@@ -78,11 +74,8 @@ public class FastApiClient {
         };
     }
 
-    public record CreateRequest(String situation, Target target, Tone tone) {}
-    public record EvolveRequest(String situation, Target target, Tone tone, String rootExcuse,
-                                String currentExcuse, List<ConversationTurn> conversation,
-                                int roundNumber, String direction) {}
-    public record ReplyRequest(String situation, Target target, Tone tone, String rootExcuse,
+    public record CreateRequest(String situation, Target target, String targetDescription, Tone tone) {}
+    public record ReplyRequest(String situation, Target target, String targetDescription, Tone tone, String rootExcuse,
                                String currentExcuse, List<ConversationTurn> conversation,
                                int roundNumber, String incomingMessage) {}
     public record ConversationTurn(String role, String content) {}
