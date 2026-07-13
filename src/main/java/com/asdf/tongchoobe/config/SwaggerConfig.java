@@ -22,7 +22,7 @@ public class SwaggerConfig {
 
                                 1. /api/auth/signup, /api/auth/login, /api/meta는 인증 없이 호출 가능
                                 2. 나머지 API는 로그인 후 발급받은 accessToken을 Authorize에 Bearer 토큰으로 입력해야 호출 가능
-                                3. 현재 LLM 연동은 건너뛰었고, 변명 생성/진화/답장은 임시 생성 로직으로 동작
+                                3. 변명 생성/진화/답장은 내부 FastAPI AI 서버와 연동
                                 """)
                         .version("1.0.0"))
                 .components(new Components()

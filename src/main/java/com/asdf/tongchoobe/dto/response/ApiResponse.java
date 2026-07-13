@@ -36,11 +36,6 @@ public class ApiResponse<T> {
         return new ApiResponse<>(201, "생성되었습니다.", data);
     }
 
-    // 204 No Content — 이 프로젝트에는 삭제 API가 없지만 Kiosk-BE 컨벤션을 그대로 유지
-    public static ApiResponse<Void> noContent() {
-        return new ApiResponse<>(204, "삭제되었습니다.", null);
-    }
-
     // 4xx/5xx 에러, data 없이 message만 내려줄 때 (GlobalExceptionHandler에서 주로 사용)
     public static ApiResponse<Void> error(int status, String message) {
         return new ApiResponse<>(status, message, null);
