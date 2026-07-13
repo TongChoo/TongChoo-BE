@@ -28,6 +28,7 @@ public class ExcuseResponse {
     private AnalysisResponse analysis;
     private List<AftermathResponse> aftermath;
     private List<String> remember;
+    private List<String> replyOptions;
     private int earnedXp;
     private ComplexityWarningResponse complexityWarning;
     private Instant createdAt;
@@ -38,6 +39,17 @@ public class ExcuseResponse {
             List<ExcuseRememberItem> rememberItems,
             List<ExcuseAftermath> aftermaths,
             ComplexityWarningResponse complexityWarning
+    ) {
+        return from(excuse, riskFactors, rememberItems, aftermaths, complexityWarning, List.of());
+    }
+
+    public static ExcuseResponse from(
+            Excuse excuse,
+            List<ExcuseRiskFactor> riskFactors,
+            List<ExcuseRememberItem> rememberItems,
+            List<ExcuseAftermath> aftermaths,
+            ComplexityWarningResponse complexityWarning,
+            List<String> replyOptions
     ) {
         return ExcuseResponse.builder()
                 .id(excuse.getId())
@@ -63,6 +75,7 @@ public class ExcuseResponse {
                 .remember(rememberItems.stream()
                         .map(ExcuseRememberItem::getContent)
                         .toList())
+                .replyOptions(replyOptions == null ? List.of() : replyOptions)
                 .earnedXp(excuse.getEarnedXp())
                 .complexityWarning(complexityWarning)
                 .createdAt(excuse.getCreatedAt())

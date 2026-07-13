@@ -197,7 +197,14 @@ public class ExcuseService {
 
         user.gainXp(earnedXp);
 
-        return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, buildReplyComplexityWarning(previous));
+        return ExcuseResponse.from(
+                excuse,
+                riskFactors,
+                rememberItems,
+                aftermaths,
+                buildReplyComplexityWarning(previous),
+                reply.replyOptions()
+        );
     }
 
     private List<ExcuseRiskFactor> toRiskFactors(Excuse excuse, List<FastApiClient.Item> items) {

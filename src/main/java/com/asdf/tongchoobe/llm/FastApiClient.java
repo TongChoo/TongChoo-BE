@@ -97,7 +97,8 @@ public class FastApiClient {
             @JsonAlias("risk_factors") List<Item> legacyRiskFactors,
             @JsonAlias("remember_items") List<Item> legacyRememberItems,
             @JsonAlias("remember") List<String> rememberTexts,
-            @JsonAlias({"aftermath", "aftermaths"}) List<Aftermath> rawAftermaths) {
+            @JsonAlias({"aftermath", "aftermaths"}) List<Aftermath> rawAftermaths,
+            @JsonAlias({"replyOptions", "reply_options"}) List<String> rawReplyOptions) {
         public int successRate() {
             return analysis != null ? analysis.successRate() : valueOrDefault(rawSuccessRate, 50);
         }
@@ -150,6 +151,16 @@ public class FastApiClient {
                 ));
             }
             return indexed;
+        }
+
+        public List<String> replyOptions() {
+            if (rawReplyOptions == null) {
+                return List.of();
+            }
+            return rawReplyOptions.stream()
+                    .filter(option -> option != null && !option.isBlank())
+                    .limit(3)
+                    .toList();
         }
 
         private static int valueOrDefault(Integer value, int defaultValue) {
