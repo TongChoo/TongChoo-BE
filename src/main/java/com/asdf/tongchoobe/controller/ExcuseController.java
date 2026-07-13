@@ -2,6 +2,7 @@ package com.asdf.tongchoobe.controller;
 
 import com.asdf.tongchoobe.dto.request.ExcuseCreateRequest;
 import com.asdf.tongchoobe.dto.request.ExcuseEvolveRequest;
+import com.asdf.tongchoobe.dto.request.ExcuseReplyRequest;
 import com.asdf.tongchoobe.dto.response.ApiResponse;
 import com.asdf.tongchoobe.dto.response.ExcuseResponse;
 import com.asdf.tongchoobe.dto.response.ExcuseSummaryResponse;
@@ -61,5 +62,15 @@ public class ExcuseController {
     ) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.created(excuseService.evolveExcuse(id, request, userDetails)));
+    }
+
+    @PostMapping("/{id}/reply")
+    public ResponseEntity<ApiResponse<ExcuseResponse>> replyToExcuse(
+            @PathVariable Long id,
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            @Valid @RequestBody ExcuseReplyRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.created(excuseService.replyToExcuse(id, request, userDetails)));
     }
 }

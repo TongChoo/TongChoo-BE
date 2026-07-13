@@ -11,6 +11,7 @@ import com.asdf.tongchoobe.domain.Tone;
 import com.asdf.tongchoobe.domain.User;
 import com.asdf.tongchoobe.dto.request.ExcuseCreateRequest;
 import com.asdf.tongchoobe.dto.request.ExcuseEvolveRequest;
+import com.asdf.tongchoobe.dto.request.ExcuseReplyRequest;
 import com.asdf.tongchoobe.dto.response.ExcuseResponse;
 import com.asdf.tongchoobe.dto.response.ExcuseSummaryResponse;
 import com.asdf.tongchoobe.dto.response.PageResponse;
@@ -169,6 +170,63 @@ public class ExcuseService {
         return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, buildComplexityWarning(parent));
     }
 
+    @Transactional
+    public ExcuseResponse replyToExcuse(Long excuseId, ExcuseReplyRequest request, CustomUserDetails userDetails) {
+        User user = userRepository.findById(userDetails.getUser().getId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+
+        Excuse previous = excuseRepository.findById(excuseId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.EXCUSE_NOT_FOUND));
+
+        validateOwner(previous, user);
+
+        if (previous.getRoundNumber() >= 5) {
+            throw new BusinessException(ErrorCode.MAX_REPLY_ROUND_REACHED);
+        }
+
+        TemporaryExcuse reply = createTemporaryReply(previous, request.getIncomingMessage());
+        int earnedXp = calculateEarnedXp(reply.successRate(), reply.realism(), reply.persuasion(), previous.getTone());
+
+        Excuse excuse = excuseRepository.save(Excuse.builder()
+                .user(user)
+                .replyToExcuse(previous)
+                .situation(previous.getSituation())
+                .target(previous.getTarget())
+                .tone(previous.getTone())
+                .excuseText(reply.excuseText())
+                .incomingMessage(request.getIncomingMessage().trim())
+                .roundNumber(previous.getRoundNumber() + 1)
+                .successRate(reply.successRate())
+                .realism(reply.realism())
+                .persuasion(reply.persuasion())
+                .suspicionLevel(reply.suspicionLevel())
+                .earnedXp(earnedXp)
+                .build());
+
+        List<ExcuseRiskFactor> riskFactors = riskFactorRepository.saveAll(buildReplyRiskFactors(
+                excuse,
+                previous,
+                reply.successRate()
+        ));
+
+        List<ExcuseRememberItem> rememberItems = rememberItemRepository.saveAll(buildReplyRememberItems(
+                excuse,
+                previous,
+                request.getIncomingMessage()
+        ));
+
+        List<ExcuseAftermath> aftermaths = aftermathRepository.saveAll(buildTemporaryAftermaths(
+                excuse,
+                excuse.getTarget(),
+                excuse.getTone(),
+                reply.successRate()
+        ));
+
+        user.gainXp(earnedXp);
+
+        return ExcuseResponse.from(excuse, riskFactors, rememberItems, aftermaths, buildReplyComplexityWarning(previous));
+    }
+
     private void validateOwner(Excuse excuse, User user) {
         if (!excuse.getUser().getId().equals(user.getId())) {
             throw new BusinessException(ErrorCode.EXCUSE_ACCESS_DENIED);
@@ -301,6 +359,31 @@ public class ExcuseService {
         return new TemporaryExcuse(evolvedText, successRate, realism, persuasion, suspicionLevel);
     }
 
+    private TemporaryExcuse createTemporaryReply(Excuse previous, String incomingMessage) {
+        String trimmedMessage = incomingMessage.trim();
+        int messagePressure = calculateIncomingPressure(trimmedMessage);
+
+        int successRate = clamp(previous.getSuccessRate() - messagePressure + 4, 38, 90);
+        int realism = clamp(previous.getRealism() + (messagePressure >= 10 ? -1 : 0), 1, 5);
+        int persuasion = clamp(previous.getPersuasion() + 1, 1, 5);
+        SuspicionLevel suspicionLevel = calculateSuspicionLevel(successRate, previous.getTone());
+
+        String replyText = switch (previous.getTarget()) {
+            case TEACHER -> "맞아요, 미리 말씀드렸어야 했습니다. 지금은 변명보다 처리 결과가 중요하다고 생각해서, 바로 확인 가능한 내용부터 정리해서 보내드리겠습니다.";
+            case PARENT -> "미리 말 못 한 건 제가 잘못했어요. 숨기려던 건 아니고 상황을 정리하고 말하려다 늦어졌어요. 지금부터는 바로 공유할게요.";
+            case FRIEND -> "그 말 맞아. 바로 말했어야 했는데 괜히 어물쩍하다가 더 이상해졌어. 지금부터는 솔직하게 말하고 바로 맞출게.";
+            case LOVER -> "그렇게 느낄 수 있어. 내가 먼저 말했어야 했는데 늦게 말해서 더 불안하게 만든 것 같아. 지금은 숨기지 않고 정확히 말할게.";
+            case TEAM_LEAD -> "맞습니다. 사전 공유가 늦었던 게 제일 큰 문제였습니다. 지금 기준으로 남은 작업과 복구 시간을 바로 정리해서 공유드리겠습니다.";
+            case TEAM_MEMBER -> "맞아, 미리 공유했어야 했어. 지금이라도 내가 맡을 부분을 명확히 정리하고 바로 처리할게.";
+        };
+
+        if (trimmedMessage.contains("증거") || trimmedMessage.contains("확인") || trimmedMessage.contains("보여")) {
+            replyText += " 확인 가능한 자료가 있는 부분은 바로 같이 보여줄게.";
+        }
+
+        return new TemporaryExcuse(replyText, successRate, realism, persuasion, suspicionLevel);
+    }
+
     private List<ExcuseRiskFactor> buildTemporaryRiskFactors(Excuse excuse, Target target, Tone tone, int successRate) {
         return List.of(
                 ExcuseRiskFactor.builder()
@@ -358,6 +441,48 @@ public class ExcuseService {
                 ExcuseRememberItem.builder()
                         .excuse(excuse)
                         .content("원본 상황 키워드는 '" + summarizeSituation(parent.getSituation()) + "'로 기억해.")
+                        .sortOrder(2)
+                        .build()
+        );
+    }
+
+    private List<ExcuseRiskFactor> buildReplyRiskFactors(Excuse excuse, Excuse previous, int successRate) {
+        return List.of(
+                ExcuseRiskFactor.builder()
+                        .excuse(excuse)
+                        .content("상대가 이미 한 번 의심했기 때문에 이전 변명과 말이 충돌하면 바로 무너질 수 있어.")
+                        .sortOrder(0)
+                        .build(),
+                ExcuseRiskFactor.builder()
+                        .excuse(excuse)
+                        .content(successRate < 60
+                                ? "현재 라운드는 성공률이 낮아. 추가 변명보다 사과와 수습 약속이 더 안전할 수 있어."
+                                : "이번 답장에서는 짧게 인정하고 바로 해결 행동을 붙이는 게 좋아.")
+                        .sortOrder(1)
+                        .build(),
+                ExcuseRiskFactor.builder()
+                        .excuse(excuse)
+                        .content("현재 대화 라운드는 " + (previous.getRoundNumber() + 1) + "라운드라 설정을 더 늘리면 기억 부담이 커져.")
+                        .sortOrder(2)
+                        .build()
+        );
+    }
+
+    private List<ExcuseRememberItem> buildReplyRememberItems(Excuse excuse, Excuse previous, String incomingMessage) {
+        return List.of(
+                ExcuseRememberItem.builder()
+                        .excuse(excuse)
+                        .content("직전 변명에서 말한 핵심 이유를 바꾸지 마.")
+                        .sortOrder(0)
+                        .build(),
+                ExcuseRememberItem.builder()
+                        .excuse(excuse)
+                        .content("상대 답장 키워드는 '" + summarizeSituation(incomingMessage) + "'로 기억해.")
+                        .sortOrder(1)
+                        .build(),
+                ExcuseRememberItem.builder()
+                        .excuse(excuse)
+                        .content("현재 답장 라운드는 " + (previous.getRoundNumber() + 1) + "라운드야.")
                         .sortOrder(2)
                         .build()
         );
@@ -456,6 +581,20 @@ public class ExcuseService {
         return clamp(100 - successRate + toneRisk + timeRisk, 8, 88);
     }
 
+    private int calculateIncomingPressure(String incomingMessage) {
+        int pressure = 0;
+        if (incomingMessage.contains("?") || incomingMessage.contains("왜") || incomingMessage.contains("근데")) {
+            pressure += 5;
+        }
+        if (incomingMessage.contains("증거") || incomingMessage.contains("확인") || incomingMessage.contains("보여")) {
+            pressure += 8;
+        }
+        if (incomingMessage.contains("거짓말") || incomingMessage.contains("솔직") || incomingMessage.contains("믿")) {
+            pressure += 10;
+        }
+        return clamp(pressure, 0, 18);
+    }
+
     private SuspicionLevel calculateSuspicionLevel(int successRate, Tone tone) {
         if (tone == Tone.BULLSHIT || successRate < 62) {
             return SuspicionLevel.HIGH;
@@ -520,6 +659,26 @@ public class ExcuseService {
         return ExcuseResponse.ComplexityWarningResponse.builder()
                 .enabled(true)
                 .message("변명 설정이 많이 쌓였어. 이제 추가 진화보다 사과/수습 전략이 더 안전할 수 있어.")
+                .build();
+    }
+
+    private ExcuseResponse.ComplexityWarningResponse buildReplyComplexityWarning(Excuse previous) {
+        int roundNumber = previous.getRoundNumber() + 1;
+        if (roundNumber <= 2) {
+            return ExcuseResponse.ComplexityWarningResponse.builder()
+                    .enabled(false)
+                    .message("아직 답장 라운드가 낮아서 설정 관리가 가능한 상태야.")
+                    .build();
+        }
+        if (roundNumber <= 4) {
+            return ExcuseResponse.ComplexityWarningResponse.builder()
+                    .enabled(true)
+                    .message("대화가 길어지고 있어. 이전 답변과 말이 충돌하지 않게 조심해.")
+                    .build();
+        }
+        return ExcuseResponse.ComplexityWarningResponse.builder()
+                .enabled(true)
+                .message("최대 라운드에 가까워졌어. 추가 변명보다 수습 전략으로 전환하는 게 안전해.")
                 .build();
     }
 
