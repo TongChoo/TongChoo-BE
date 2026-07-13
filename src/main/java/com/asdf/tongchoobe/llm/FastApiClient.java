@@ -2,11 +2,13 @@ package com.asdf.tongchoobe.llm;
 
 import com.asdf.tongchoobe.config.FastApiProperties;
 import com.asdf.tongchoobe.domain.SuspicionLevel;
+import com.asdf.tongchoobe.domain.SituationSeverity;
 import com.asdf.tongchoobe.domain.Target;
 import com.asdf.tongchoobe.domain.Tone;
 import com.asdf.tongchoobe.exception.BusinessException;
 import com.asdf.tongchoobe.exception.ErrorCode;
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -20,6 +22,7 @@ import java.util.UUID;
 @Component
 public class FastApiClient {
     private final RestClient restClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public FastApiClient(RestClient.Builder builder, FastApiProperties properties) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -53,29 +56,50 @@ public class FastApiClient {
             return spec.body(request)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (ignored, response) -> {
-                        throw new FastApiException(response.getStatusCode().value());
+                        throw readFastApiException(
+                                response.getStatusCode().value(),
+                                response.getBody()
+                        );
                     })
                     .body(GeneratedExcuse.class);
         } catch (FastApiException exception) {
-            throw map(exception.status);
+            throw map(exception);
         } catch (ResourceAccessException exception) {
             throw new BusinessException(ErrorCode.LLM_UNAVAILABLE);
         }
     }
 
-    private BusinessException map(int status) {
-        return switch (status) {
-            case 401 -> new BusinessException(ErrorCode.AI_INTERNAL_TOKEN_INVALID);
-            case 402 -> new BusinessException(ErrorCode.AI_QUOTA_EXCEEDED);
-            case 422 -> new BusinessException(ErrorCode.LLM_PARSE_ERROR);
-            case 429 -> new BusinessException(ErrorCode.AI_RATE_LIMITED);
-            case 502, 503 -> new BusinessException(ErrorCode.LLM_UNAVAILABLE);
-            default -> new BusinessException(ErrorCode.LLM_UNAVAILABLE);
+    private FastApiException readFastApiException(int status, java.io.InputStream body) {
+        try {
+            FastApiErrorResponse response = objectMapper.readValue(body, FastApiErrorResponse.class);
+            if (response.detail() != null) {
+                return new FastApiException(
+                        status,
+                        response.detail().code(),
+                        response.detail().message()
+                );
+            }
+        } catch (Exception ignored) {
+            // FastAPI 오류 본문까지 깨진 경우에는 기존 상태 코드 기반 메시지로 처리한다.
+        }
+        return new FastApiException(status, null, null);
+    }
+
+    private BusinessException map(FastApiException exception) {
+        ErrorCode errorCode = switch (exception.status) {
+            case 401 -> ErrorCode.AI_INTERNAL_TOKEN_INVALID;
+            case 402 -> ErrorCode.AI_QUOTA_EXCEEDED;
+            case 422 -> ErrorCode.LLM_PARSE_ERROR;
+            case 429 -> ErrorCode.AI_RATE_LIMITED;
+            case 502, 503 -> ErrorCode.LLM_UNAVAILABLE;
+            default -> ErrorCode.LLM_UNAVAILABLE;
         };
+        return new BusinessException(errorCode, exception.aiMessage, exception.aiCode);
     }
 
     public record CreateRequest(String situation, Target target, String targetDescription, Tone tone) {}
-    public record ReplyRequest(String situation, Target target, String targetDescription, Tone tone, String rootExcuse,
+    public record ReplyRequest(String situation, Target target, String targetDescription, Tone tone,
+                               SituationSeverity situationSeverity, String rootExcuse,
                                String currentExcuse, List<ConversationTurn> conversation,
                                int roundNumber, String incomingMessage) {}
     public record ConversationTurn(String role, String content) {}
@@ -86,6 +110,7 @@ public class FastApiClient {
             @JsonAlias({"realism", "raw_realism"}) Integer rawRealism,
             @JsonAlias({"persuasion", "raw_persuasion"}) Integer rawPersuasion,
             @JsonAlias({"suspicionLevel", "suspicion_level"}) SuspicionLevel rawSuspicionLevel,
+            @JsonAlias({"situationSeverity", "situation_severity"}) SituationSeverity rawSituationSeverity,
             Analysis analysis,
             @JsonAlias({"riskFactors", "risk_factors"}) List<Item> legacyRiskFactors,
             @JsonAlias({"rememberItems", "remember_items"}) List<Item> legacyRememberItems,
@@ -109,6 +134,10 @@ public class FastApiClient {
                 return analysis.suspicionLevel();
             }
             return rawSuspicionLevel == null ? SuspicionLevel.MEDIUM : rawSuspicionLevel;
+        }
+
+        public SituationSeverity situationSeverity() {
+            return rawSituationSeverity == null ? SituationSeverity.NORMAL : rawSituationSeverity;
         }
 
         public List<Item> riskFactors() {
@@ -190,6 +219,16 @@ public class FastApiClient {
 
     private static class FastApiException extends RuntimeException {
         private final int status;
-        private FastApiException(int status) { this.status = status; }
+        private final String aiCode;
+        private final String aiMessage;
+
+        private FastApiException(int status, String aiCode, String aiMessage) {
+            this.status = status;
+            this.aiCode = aiCode;
+            this.aiMessage = aiMessage;
+        }
     }
+
+    private record FastApiErrorResponse(FastApiErrorDetail detail) {}
+    private record FastApiErrorDetail(String code, String message) {}
 }

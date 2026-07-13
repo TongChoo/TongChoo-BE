@@ -3,10 +3,12 @@ package com.asdf.tongchoobe.service;
 import com.asdf.tongchoobe.domain.Excuse;
 import com.asdf.tongchoobe.domain.ExcuseReplyOption;
 import com.asdf.tongchoobe.domain.SuspicionLevel;
+import com.asdf.tongchoobe.domain.SituationSeverity;
 import com.asdf.tongchoobe.domain.Target;
 import com.asdf.tongchoobe.domain.Tone;
 import com.asdf.tongchoobe.domain.User;
 import com.asdf.tongchoobe.dto.request.ExcuseReplyRequest;
+import com.asdf.tongchoobe.dto.request.ExcuseCreateRequest;
 import com.asdf.tongchoobe.dto.request.ExcuseSelectionRequest;
 import com.asdf.tongchoobe.dto.response.ExcuseSummaryResponse;
 import com.asdf.tongchoobe.dto.response.PageResponse;
@@ -50,6 +52,39 @@ class ExcuseServiceTest {
     @InjectMocks private ExcuseService excuseService;
 
     @Test
+    void createPersistsSituationSeverityReturnedByAi() throws Exception {
+        User user = user();
+        ExcuseCreateRequest request = new ObjectMapper().readValue(
+                """
+                {
+                  "situation": "고객사 최종 발표자료 제출을 놓쳤다",
+                  "target": "TEAM_LEAD",
+                  "tone": "MILD"
+                }
+                """,
+                ExcuseCreateRequest.class
+        );
+        FastApiClient.GeneratedExcuse generated = generatedExcuse(
+                "마감 누락을 인정하고 바로 자료 상태를 확인하겠습니다.",
+                SituationSeverity.SERIOUS
+        );
+
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(fastApiClient.create(any())).thenReturn(generated);
+        when(excuseRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(riskFactorRepository.saveAll(any())).thenReturn(List.of());
+        when(rememberItemRepository.saveAll(any())).thenReturn(List.of());
+        when(aftermathRepository.saveAll(any())).thenReturn(List.of());
+        when(replyOptionRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        excuseService.createExcuse(request, new CustomUserDetails(user));
+
+        ArgumentCaptor<Excuse> captor = ArgumentCaptor.forClass(Excuse.class);
+        verify(excuseRepository).save(captor.capture());
+        assertEquals(SituationSeverity.SERIOUS, captor.getValue().getSituationSeverity());
+    }
+
+    @Test
     void historyReturnsLatestStateForEachRootConversation() {
         User user = user();
         Excuse root = excuse(1L, user, null, 1, Instant.parse("2026-07-14T00:00:00Z"));
@@ -78,6 +113,7 @@ class ExcuseServiceTest {
         Excuse previous = excuse(1L, user, null, 1, Instant.parse("2026-07-14T00:00:00Z"));
         previous.setTarget(Target.CUSTOM);
         previous.setTargetDescription("같은 프로젝트를 진행하는 친한 선배");
+        previous.setSituationSeverity(SituationSeverity.SERIOUS);
         ExcuseReplyRequest request = new ObjectMapper().readValue(
                 """
                 {
@@ -94,6 +130,7 @@ class ExcuseServiceTest {
                 4,
                 4,
                 SuspicionLevel.MEDIUM,
+                SituationSeverity.NORMAL,
                 null,
                 List.of(),
                 List.of(),
@@ -122,7 +159,12 @@ class ExcuseServiceTest {
         assertEquals(request.getCurrentExcuse(), previous.getExcuseText());
         assertEquals(request.getCurrentExcuse(), captor.getValue().currentExcuse());
         assertEquals("같은 프로젝트를 진행하는 친한 선배", captor.getValue().targetDescription());
+        assertEquals(SituationSeverity.SERIOUS, captor.getValue().situationSeverity());
         assertEquals(request.getCurrentExcuse(), captor.getValue().conversation().getFirst().content());
+
+        ArgumentCaptor<Excuse> savedCaptor = ArgumentCaptor.forClass(Excuse.class);
+        verify(excuseRepository).saveAndFlush(savedCaptor.capture());
+        assertEquals(SituationSeverity.SERIOUS, savedCaptor.getValue().getSituationSeverity());
     }
 
     @Test
@@ -211,6 +253,7 @@ class ExcuseServiceTest {
                 .situation("팀 회의에 늦었다")
                 .target(Target.TEAM_LEAD)
                 .tone(Tone.MILD)
+                .situationSeverity(SituationSeverity.NORMAL)
                 .excuseText("기존 답장입니다.")
                 .roundNumber(roundNumber)
                 .successRate(50)
@@ -219,6 +262,26 @@ class ExcuseServiceTest {
                 .suspicionLevel(SuspicionLevel.MEDIUM)
                 .createdAt(createdAt)
                 .build();
+    }
+
+    private FastApiClient.GeneratedExcuse generatedExcuse(
+            String excuseText,
+            SituationSeverity severity
+    ) {
+        return new FastApiClient.GeneratedExcuse(
+                excuseText,
+                60,
+                4,
+                4,
+                SuspicionLevel.MEDIUM,
+                severity,
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("바로 확인하겠습니다.", "상태를 점검하겠습니다.")
+        );
     }
 
     private ExcuseReplyOption option(Excuse excuse, String text, boolean selected) {

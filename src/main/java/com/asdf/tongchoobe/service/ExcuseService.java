@@ -72,6 +72,7 @@ public class ExcuseService {
                 .target(request.getTarget())
                 .targetDescription(normalizeTargetDescription(request.getTarget(), request.getTargetDescription()))
                 .tone(request.getTone())
+                .situationSeverity(generated.situationSeverity())
                 .excuseText(generated.excuseText())
                 .roundNumber(1)
                 .successRate(generated.successRate())
@@ -188,7 +189,8 @@ public class ExcuseService {
         conversation.add(new FastApiClient.ConversationTurn("user", incomingMessage));
 
         FastApiClient.GeneratedExcuse reply = fastApiClient.reply(new FastApiClient.ReplyRequest(
-                previous.getSituation(), previous.getTarget(), previous.getTargetDescription(), previous.getTone(), rootExcuse(previous),
+                previous.getSituation(), previous.getTarget(), previous.getTargetDescription(), previous.getTone(),
+                previous.getSituationSeverity(), rootExcuse(previous),
                 previous.getExcuseText(), conversation, previous.getRoundNumber() + 1,
                 incomingMessage));
         int earnedXp = calculateEarnedXp(reply.successRate(), reply.realism(), reply.persuasion(), previous.getTone());
@@ -202,6 +204,7 @@ public class ExcuseService {
                     .target(previous.getTarget())
                     .targetDescription(previous.getTargetDescription())
                     .tone(previous.getTone())
+                    .situationSeverity(previous.getSituationSeverity())
                     .excuseText(reply.excuseText())
                     .incomingMessage(incomingMessage)
                     .roundNumber(previous.getRoundNumber() + 1)

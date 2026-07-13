@@ -9,9 +9,15 @@ import lombok.Getter;
 @Getter
 public class BusinessException extends RuntimeException {
     private final ErrorCode errorCode;
+    private final String detailCode;
 
     public BusinessException(ErrorCode errorCode) {
-        super(errorCode.getMessage());
+        this(errorCode, errorCode.getMessage(), null);
+    }
+
+    public BusinessException(ErrorCode errorCode, String message, String detailCode) {
+        super(message == null || message.isBlank() ? errorCode.getMessage() : message);
         this.errorCode = errorCode;
+        this.detailCode = detailCode;
     }
 }

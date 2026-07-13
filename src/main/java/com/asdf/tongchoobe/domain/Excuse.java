@@ -62,6 +62,11 @@ public class Excuse {
     @Column(nullable = false, length = 20)
     private Tone tone;
 
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "situation_severity", nullable = false, length = 10)
+    private SituationSeverity situationSeverity = SituationSeverity.NORMAL;
+
     @Column(name = "excuse_text", nullable = false, length = 1000)
     private String excuseText;
 

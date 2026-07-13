@@ -20,13 +20,20 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException exception) {
+    public ResponseEntity<ApiResponse<?>> handleBusinessException(BusinessException exception) {
         ErrorCode errorCode = exception.getErrorCode();
         HttpStatus status = errorCode.getHttpStatus();
+        ApiResponse<?> response = exception.getDetailCode() == null
+                ? ApiResponse.error(status.value(), exception.getMessage())
+                : ApiResponse.error(
+                        status.value(),
+                        exception.getMessage(),
+                        Map.of("code", exception.getDetailCode())
+                );
 
         return ResponseEntity
                 .status(status)
-                .body(ApiResponse.error(status.value(), exception.getMessage()));
+                .body(response);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
