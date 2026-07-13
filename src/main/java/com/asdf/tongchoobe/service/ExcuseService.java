@@ -159,7 +159,7 @@ public class ExcuseService {
 
         validateOwner(previous, user);
 
-        if (previous.getRoundNumber() >= 10) {
+        if (previous.getRoundNumber() >= 5) {
             throw new BusinessException(ErrorCode.MAX_REPLY_ROUND_REACHED);
         }
 
