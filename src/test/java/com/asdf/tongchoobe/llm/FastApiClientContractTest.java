@@ -102,7 +102,6 @@ class FastApiClientContractTest {
                     Tone.SLICK,
                     SituationSeverity.NORMAL,
                     "제출 마감을 놓쳤습니다.",
-                    "제출 마감을 놓쳤습니다.",
                     List.of(),
                     2,
                     "왜 시간을 지키지 않았나요?"

@@ -7,4 +7,6 @@ import java.util.List;
 
 public interface ExcuseAftermathRepository extends JpaRepository<ExcuseAftermath, Long> {
     List<ExcuseAftermath> findByExcuseIdOrderBySortOrderAsc(Long excuseId);
+
+    List<ExcuseAftermath> findByExcuseIdInOrderByExcuseIdAscSortOrderAsc(List<Long> excuseIds);
 }

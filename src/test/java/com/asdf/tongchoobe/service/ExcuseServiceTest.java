@@ -27,6 +27,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.Instant;
 import java.util.List;
@@ -37,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class ExcuseServiceTest {
@@ -93,9 +96,14 @@ class ExcuseServiceTest {
         Excuse otherRoot = excuse(4L, user, null, 1, Instant.parse("2026-07-14T00:01:30Z"));
 
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
-        when(excuseRepository.findByUserIdOrderByCreatedAtDesc(user.getId()))
-                .thenReturn(List.of(reply3, otherRoot, reply2, root));
-        when(aftermathRepository.findByExcuseIdOrderBySortOrderAsc(any())).thenReturn(List.of());
+        when(excuseRepository.findLatestConversationRounds(user.getId(), PageRequest.of(0, 10)))
+                .thenReturn(new PageImpl<>(
+                        List.of(reply3, otherRoot),
+                        PageRequest.of(0, 10),
+                        2
+                ));
+        when(aftermathRepository.findByExcuseIdInOrderByExcuseIdAscSortOrderAsc(List.of(3L, 4L)))
+                .thenReturn(List.of());
 
         PageResponse<ExcuseSummaryResponse> result = excuseService.getMyExcuses(
                 new CustomUserDetails(user), 0, 10
@@ -123,6 +131,7 @@ class ExcuseServiceTest {
                 """,
                 ExcuseReplyRequest.class
         );
+        previous.setExcuseText(request.getCurrentExcuse());
 
         FastApiClient.GeneratedExcuse generated = new FastApiClient.GeneratedExcuse(
                 "지금 수정하고 있고 10분 안에 공유하겠습니다.",
@@ -136,14 +145,16 @@ class ExcuseServiceTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                List.of("10분 안에 공유할게요.", "수정해서 바로 공유드리겠습니다.")
+                List.of(
+                        "10분 안에 공유할게요.",
+                        "수정해서 바로 공유드리겠습니다.",
+                        "상태부터 확인하고 이어서 공유하겠습니다."
+                )
         );
 
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
         when(excuseRepository.findByIdForUpdate(previous.getId())).thenReturn(Optional.of(previous));
         when(excuseRepository.existsByReplyToExcuseId(previous.getId())).thenReturn(false);
-        when(replyOptionRepository.findByExcuseIdOrderBySortOrderAsc(previous.getId()))
-                .thenReturn(List.of(option(previous, request.getCurrentExcuse(), true)));
         when(fastApiClient.reply(any())).thenReturn(generated);
         when(excuseRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(riskFactorRepository.saveAll(any())).thenReturn(List.of());
@@ -160,7 +171,9 @@ class ExcuseServiceTest {
         assertEquals(request.getCurrentExcuse(), captor.getValue().currentExcuse());
         assertEquals("같은 프로젝트를 진행하는 친한 선배", captor.getValue().targetDescription());
         assertEquals(SituationSeverity.SERIOUS, captor.getValue().situationSeverity());
-        assertEquals(request.getCurrentExcuse(), captor.getValue().conversation().getFirst().content());
+        assertEquals(List.of(), captor.getValue().conversation());
+        verify(replyOptionRepository, never())
+                .findByExcuseIdOrderBySortOrderAsc(previous.getId());
 
         ArgumentCaptor<Excuse> savedCaptor = ArgumentCaptor.forClass(Excuse.class);
         verify(excuseRepository).saveAndFlush(savedCaptor.capture());
@@ -280,7 +293,11 @@ class ExcuseServiceTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                List.of("바로 확인하겠습니다.", "상태를 점검하겠습니다.")
+                List.of(
+                        "바로 확인하겠습니다.",
+                        "상태를 점검하겠습니다.",
+                        "확인한 내용을 정리해 공유하겠습니다."
+                )
         );
     }
 

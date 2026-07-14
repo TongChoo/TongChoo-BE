@@ -49,10 +49,6 @@ public class User {
     @Column(nullable = false, length = 20)
     private Grade grade = Grade.NOVICE;
 
-    @Builder.Default
-    @Column(nullable = false)
-    private int excuseCount = 0;
-
     @CreatedDate
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -64,10 +60,6 @@ public class User {
     public void gainXp(int amount) {
         this.totalXp += amount;
         this.grade = Grade.of(this.totalXp);
-    }
-
-    public void recordExcuseCreation() {
-        this.excuseCount++;
     }
 
     public void changeNickname(String nickname) {

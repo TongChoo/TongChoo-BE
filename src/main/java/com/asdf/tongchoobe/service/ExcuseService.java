@@ -28,14 +28,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -88,8 +86,6 @@ public class ExcuseService {
         List<ExcuseReplyOption> replyOptions = saveReplyOptions(excuse, generated.excuseText(), generated.replyOptions());
 
         user.gainXp(earnedXp);
-        user.recordExcuseCreation();
-
         return response(excuse, riskFactors, rememberItems, aftermaths, null, replyOptions);
     }
 
@@ -98,20 +94,27 @@ public class ExcuseService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         Pageable pageable = PageRequest.of(Math.max(page, 0), clamp(size, 1, 50));
-        Map<Long, Excuse> latestByRootId = new LinkedHashMap<>();
-        excuseRepository.findByUserIdOrderByCreatedAtDesc(user.getId())
-                .forEach(excuse -> latestByRootId.putIfAbsent(rootOf(excuse).getId(), excuse));
+        Page<Excuse> latestPage = excuseRepository.findLatestConversationRounds(
+                user.getId(),
+                pageable
+        );
+        List<Long> excuseIds = latestPage.getContent().stream()
+                .map(Excuse::getId)
+                .toList();
+        Map<Long, List<ExcuseAftermath>> aftermathsByExcuseId = excuseIds.isEmpty()
+                ? Map.of()
+                : aftermathRepository.findByExcuseIdInOrderByExcuseIdAscSortOrderAsc(excuseIds)
+                        .stream()
+                        .collect(java.util.stream.Collectors.groupingBy(
+                                aftermath -> aftermath.getExcuse().getId()
+                        ));
 
-        List<Excuse> latestExcuses = new ArrayList<>(latestByRootId.values());
-        int start = Math.min((int) pageable.getOffset(), latestExcuses.size());
-        int end = Math.min(start + pageable.getPageSize(), latestExcuses.size());
-        Page<Excuse> latestPage = new PageImpl<>(latestExcuses.subList(start, end), pageable, latestExcuses.size());
-
-        Page<ExcuseSummaryResponse> summaries = latestPage
-                .map(excuse -> ExcuseSummaryResponse.from(
+        Page<ExcuseSummaryResponse> summaries = latestPage.map(excuse ->
+                ExcuseSummaryResponse.from(
                         excuse,
-                        aftermathRepository.findByExcuseIdOrderBySortOrderAsc(excuse.getId())
-                ));
+                        aftermathsByExcuseId.getOrDefault(excuse.getId(), List.of())
+                )
+        );
 
         return PageResponse.of(summaries);
     }
@@ -178,20 +181,19 @@ public class ExcuseService {
         }
 
         String selectedExcuse = request.getCurrentExcuse();
-        if (selectedExcuse != null && !selectedExcuse.isBlank()) {
+        if (selectedExcuse != null
+                && !selectedExcuse.isBlank()
+                && !selectedExcuse.trim().equals(previous.getExcuseText())) {
             applySelection(previous, selectedExcuse);
         }
 
         String incomingMessage = request.getIncomingMessage().trim();
-        List<FastApiClient.ConversationTurn> conversation = conversation(previous);
-        // 현재 질문은 아직 DB에 저장된 계보에는 없으므로, AI가 반드시 최신 질문으로
-        // 인식할 수 있도록 이전 대화의 마지막 user turn으로 추가한다.
-        conversation.add(new FastApiClient.ConversationTurn("user", incomingMessage));
+        List<FastApiClient.ConversationTurn> conversation = previousConversation(previous);
 
         FastApiClient.GeneratedExcuse reply = fastApiClient.reply(new FastApiClient.ReplyRequest(
                 previous.getSituation(), previous.getTarget(), previous.getTargetDescription(), previous.getTone(),
-                previous.getSituationSeverity(), rootExcuse(previous),
-                previous.getExcuseText(), conversation, previous.getRoundNumber() + 1,
+                previous.getSituationSeverity(), previous.getExcuseText(),
+                conversation, previous.getRoundNumber() + 1,
                 incomingMessage));
         int earnedXp = calculateEarnedXp(reply.successRate(), reply.realism(), reply.persuasion(), previous.getTone());
 
@@ -281,14 +283,19 @@ public class ExcuseService {
             List<String> generatedOptions
     ) {
         Set<String> uniqueOptions = new LinkedHashSet<>();
-        if (primary != null && !primary.isBlank()) {
-            uniqueOptions.add(primary.trim());
-        }
         if (generatedOptions != null) {
             generatedOptions.stream()
                     .filter(option -> option != null && !option.isBlank())
                     .map(String::trim)
+                    .limit(3)
                     .forEach(uniqueOptions::add);
+        }
+        if (uniqueOptions.size() < 3 && primary != null && !primary.isBlank()) {
+            uniqueOptions.add(primary.trim());
+        }
+
+        if (uniqueOptions.size() != 3) {
+            throw new BusinessException(ErrorCode.LLM_PARSE_ERROR);
         }
 
         List<ExcuseReplyOption> options = new ArrayList<>();
@@ -367,20 +374,7 @@ public class ExcuseService {
                 .toList();
     }
 
-    private String rootExcuse(Excuse excuse) {
-        Excuse root = rootOf(excuse);
-        return root.getExcuseText();
-    }
-
-    private Excuse rootOf(Excuse excuse) {
-        Excuse cursor = excuse;
-        while (previousRoundOf(cursor) != null) {
-            cursor = previousRoundOf(cursor);
-        }
-        return cursor;
-    }
-
-    private List<FastApiClient.ConversationTurn> conversation(Excuse current) {
+    private List<FastApiClient.ConversationTurn> previousConversation(Excuse current) {
         List<Excuse> lineage = new ArrayList<>();
         Excuse cursor = current;
         while (cursor != null) {
@@ -390,11 +384,15 @@ public class ExcuseService {
         Collections.reverse(lineage);
 
         List<FastApiClient.ConversationTurn> conversation = new ArrayList<>();
-        for (Excuse excuse : lineage) {
+        for (int index = 0; index < lineage.size(); index++) {
+            Excuse excuse = lineage.get(index);
             if (excuse.getIncomingMessage() != null && !excuse.getIncomingMessage().isBlank()) {
                 conversation.add(new FastApiClient.ConversationTurn("user", excuse.getIncomingMessage()));
             }
-            conversation.add(new FastApiClient.ConversationTurn("assistant", excuse.getExcuseText()));
+            // 현재 선택 답장은 currentExcuse로 별도 전달하므로 대화 기록에 또 넣지 않는다.
+            if (index < lineage.size() - 1) {
+                conversation.add(new FastApiClient.ConversationTurn("assistant", excuse.getExcuseText()));
+            }
         }
         return conversation;
     }

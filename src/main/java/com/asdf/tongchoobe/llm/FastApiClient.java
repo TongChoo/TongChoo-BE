@@ -92,6 +92,7 @@ public class FastApiClient {
             case 422 -> ErrorCode.LLM_PARSE_ERROR;
             case 429 -> ErrorCode.AI_RATE_LIMITED;
             case 502, 503 -> ErrorCode.LLM_UNAVAILABLE;
+            case 504 -> ErrorCode.LLM_TIMEOUT;
             default -> ErrorCode.LLM_UNAVAILABLE;
         };
         return new BusinessException(errorCode, exception.aiMessage, exception.aiCode);
@@ -99,8 +100,8 @@ public class FastApiClient {
 
     public record CreateRequest(String situation, Target target, String targetDescription, Tone tone) {}
     public record ReplyRequest(String situation, Target target, String targetDescription, Tone tone,
-                               SituationSeverity situationSeverity, String rootExcuse,
-                               String currentExcuse, List<ConversationTurn> conversation,
+                               SituationSeverity situationSeverity, String currentExcuse,
+                               List<ConversationTurn> conversation,
                                int roundNumber, String incomingMessage) {}
     public record ConversationTurn(String role, String content) {}
 

@@ -41,7 +41,6 @@ public class AuthService {
                 .nickname(request.getNickname())
                 .totalXp(0)
                 .grade(Grade.NOVICE)
-                .excuseCount(0)
                 .build();
 
         User savedUser = userRepository.save(user);
