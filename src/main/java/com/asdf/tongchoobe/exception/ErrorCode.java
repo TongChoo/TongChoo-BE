@@ -30,6 +30,7 @@ public enum ErrorCode {
 
     LLM_UNAVAILABLE(HttpStatus.BAD_GATEWAY, "AI 변명 생성에 실패했습니다. 잠시 후 다시 시도해주세요."),
     LLM_PARSE_ERROR(HttpStatus.UNPROCESSABLE_ENTITY, "AI 응답을 해석하지 못했습니다. 다시 시도해주세요."),
+    REPLY_QUALITY_REJECTED(HttpStatus.UNPROCESSABLE_ENTITY, "상대 메시지에 맞는 서로 다른 답장 후보를 만들지 못했어요. 다시 시도해주세요."),
     AI_INTERNAL_TOKEN_INVALID(HttpStatus.INTERNAL_SERVER_ERROR, "AI 서버 내부 토큰 설정이 올바르지 않습니다."),
     AI_QUOTA_EXCEEDED(HttpStatus.BAD_GATEWAY, "AI 서비스 결제 또는 quota를 확인해주세요."),
     AI_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "AI 사용량 제한에 도달했습니다. 잠시 후 다시 시도해주세요.");

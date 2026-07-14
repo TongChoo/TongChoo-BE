@@ -2,16 +2,17 @@ package com.asdf.tongchoobe.dto.request;
 
 import com.asdf.tongchoobe.domain.Target;
 import com.asdf.tongchoobe.domain.Tone;
+import com.asdf.tongchoobe.dto.request.validation.ValidTargetDescription;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Getter
 @NoArgsConstructor
+@ValidTargetDescription
 @Schema(description = "변명 생성 요청")
 public class ExcuseCreateRequest {
     @NotBlank
@@ -23,16 +24,12 @@ public class ExcuseCreateRequest {
     @Schema(description = "변명을 전달할 대상", example = "TEAM_MEMBER")
     private Target target;
 
-    @Size(max = 100)
-    @Schema(description = "target이 CUSTOM일 때 직접 입력한 상대 설명", example = "같은 프로젝트를 진행하는 친한 선배")
+    @Size(max = 100, message = "직접 입력 관계는 100자 이하여야 합니다.")
+    @Schema(description = "CUSTOM 대상일 때 사용하는 자연어 관계 설명", example = "회사 부장님")
     private String targetDescription;
 
     @NotNull
     @Schema(description = "변명 톤", example = "SLICK")
     private Tone tone;
 
-    @AssertTrue(message = "기타 상대를 선택하면 상대방 설명을 입력해주세요.")
-    public boolean isCustomTargetValid() {
-        return target != Target.CUSTOM || (targetDescription != null && !targetDescription.isBlank());
-    }
 }

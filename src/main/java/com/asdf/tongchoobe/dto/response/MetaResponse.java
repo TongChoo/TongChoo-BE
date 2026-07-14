@@ -22,7 +22,7 @@ public class MetaResponse {
                         OptionResponse.of(Target.LOVER.name(), "연인"),
                         OptionResponse.of(Target.TEAM_LEAD.name(), "팀장"),
                         OptionResponse.of(Target.TEAM_MEMBER.name(), "팀원"),
-                        OptionResponse.of(Target.CUSTOM.name(), "기타 (직접 입력)")
+                        OptionResponse.of(Target.CUSTOM.name(), "직접 입력")
                 ))
                 .tones(List.of(
                         OptionResponse.of(Tone.MILD.name(), "순한맛"),

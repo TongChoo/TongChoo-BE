@@ -7,18 +7,23 @@ import com.asdf.tongchoobe.domain.Tone;
 import com.asdf.tongchoobe.exception.BusinessException;
 import com.asdf.tongchoobe.exception.ErrorCode;
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 @Component
 public class FastApiClient {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private final RestClient restClient;
 
     public FastApiClient(RestClient.Builder builder, FastApiProperties properties) {
@@ -53,28 +58,45 @@ public class FastApiClient {
             return spec.body(request)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (ignored, response) -> {
-                        throw new FastApiException(response.getStatusCode().value());
+                        throw new FastApiException(
+                                response.getStatusCode().value(),
+                                extractFastApiErrorCode(response)
+                        );
                     })
                     .body(GeneratedExcuse.class);
         } catch (FastApiException exception) {
-            throw map(exception.status);
+            throw map(exception.status, exception.code);
         } catch (ResourceAccessException exception) {
             throw new BusinessException(ErrorCode.LLM_UNAVAILABLE);
         }
     }
 
-    private BusinessException map(int status) {
+    BusinessException map(int status, String code) {
         return switch (status) {
             case 401 -> new BusinessException(ErrorCode.AI_INTERNAL_TOKEN_INVALID);
             case 402 -> new BusinessException(ErrorCode.AI_QUOTA_EXCEEDED);
-            case 422 -> new BusinessException(ErrorCode.LLM_PARSE_ERROR);
+            case 422 -> "REPLY_QUALITY_REJECTED".equals(code)
+                    ? new BusinessException(ErrorCode.REPLY_QUALITY_REJECTED)
+                    : new BusinessException(ErrorCode.LLM_PARSE_ERROR);
             case 429 -> new BusinessException(ErrorCode.AI_RATE_LIMITED);
             case 502, 503 -> new BusinessException(ErrorCode.LLM_UNAVAILABLE);
             default -> new BusinessException(ErrorCode.LLM_UNAVAILABLE);
         };
     }
 
+    private String extractFastApiErrorCode(org.springframework.http.client.ClientHttpResponse response) {
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(response.getBody());
+            return root.path("detail").path("code").asText(null);
+        } catch (IOException exception) {
+            return null;
+        }
+    }
+
     public record CreateRequest(String situation, Target target, String targetDescription, Tone tone) {}
+    public record EvolveRequest(String situation, Target target, String targetDescription, Tone tone, String rootExcuse,
+                                String currentExcuse, List<ConversationTurn> conversation,
+                                int roundNumber, String direction) {}
     public record ReplyRequest(String situation, Target target, String targetDescription, Tone tone, String rootExcuse,
                                String currentExcuse, List<ConversationTurn> conversation,
                                int roundNumber, String incomingMessage) {}
@@ -190,6 +212,11 @@ public class FastApiClient {
 
     private static class FastApiException extends RuntimeException {
         private final int status;
-        private FastApiException(int status) { this.status = status; }
+        private final String code;
+
+        private FastApiException(int status, String code) {
+            this.status = status;
+            this.code = code;
+        }
     }
 }
